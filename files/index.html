@@ -1,0 +1,1938 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7A0E28">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Gestão de Plantão</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23971232'/%3E%3Cpath d='M8 36h12l5-13 8 22 6-15 3 6h14' fill='none' stroke='white' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { theme: { extend: {
+    colors: {
+      vinho: { 50:'#FCF3F5', 100:'#F8E3E8', 200:'#EFC3CE', 300:'#E097AA', 400:'#C9566F', 500:'#B01E42', 600:'#971232', 700:'#7A0E28', 800:'#5C0A1E', 900:'#3A0612' },
+      magenta: '#D6457A', ameixa: '#7E3A87', grafite: '#2B2327', papel: '#FAF6F7', linha: '#EDE4E7', ambar: '#E3A21A'
+    },
+    fontFamily: { sans: ['Figtree', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'] }
+  } } };
+</script>
+<style type="text/tailwindcss">
+  @layer components {
+    .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[15px] font-semibold transition active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus-visible:ring-2 focus-visible:ring-vinho-400; }
+    .btn-p { @apply bg-vinho-600 text-white hover:bg-vinho-700; }
+    .btn-s { @apply bg-white text-vinho-700 ring-1 ring-vinho-200 hover:bg-vinho-50; }
+    .btn-g { @apply text-grafite/70 hover:bg-black/5; }
+    .btn-x { @apply bg-red-600 text-white hover:bg-red-700; }
+    .inp { @apply w-full rounded-xl border border-linha bg-white px-3.5 py-3 text-[16px] outline-none focus:border-vinho-400 focus:ring-2 focus:ring-vinho-100; }
+    .lbl { @apply mb-1 mt-3 block text-[13px] font-semibold text-grafite/70; }
+    .card { @apply rounded-2xl bg-white ring-1 ring-linha; }
+    .chip { @apply inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-[13px] font-semibold text-grafite/70 ring-1 ring-linha; }
+    .chip-on { @apply bg-vinho-600 text-white ring-vinho-600; }
+    .tag { @apply inline-flex items-center rounded-md px-2 py-0.5 text-[12px] font-semibold; }
+  }
+</style>
+<style>
+  html { -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Figtree', system-ui, sans-serif; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  .safe-t { padding-top: env(safe-area-inset-top); }
+  .safe-b { padding-bottom: env(safe-area-inset-bottom); }
+  .pulso path { stroke-dasharray: 700; stroke-dashoffset: 700; animation: tracar 1.8s ease-out .15s forwards; }
+  .pulso.pronto path { animation: none; stroke-dashoffset: 0; }
+  @keyframes tracar { to { stroke-dashoffset: 0; } }
+  .sobe { animation: sobe .22s ease-out; }
+  @keyframes sobe { from { transform: translateY(28px); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .pulso path, .sobe { animation: none !important; stroke-dashoffset: 0; } }
+  .sem-barra::-webkit-scrollbar { display: none; } .sem-barra { scrollbar-width: none; }
+  input[type=range] { accent-color: #971232; }
+  #carga { transition: opacity .2s; }
+</style>
+</head>
+<body class="bg-papel text-grafite antialiased">
+<div id="carga" class="pointer-events-none fixed inset-x-0 top-0 z-[70] h-1 opacity-0"><div class="h-full w-1/3 animate-pulse bg-magenta"></div></div>
+<div id="app"></div>
+<div id="modal"></div>
+<div id="toast" class="pointer-events-none fixed inset-x-0 top-3 z-[60] flex flex-col items-center gap-2 px-4"></div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script>
+/* =====================================================================
+   ⚙️  CONFIGURAÇÃO  —  a ÚNICA parte que você precisa editar
+   Cole entre as aspas os dados do seu projeto no Supabase
+   (Project Settings > API Keys). Deixe vazio para ver a demonstração.
+   ===================================================================== */
+const SUPABASE_URL  = "";   // ex.: "https://abcdefghijk.supabase.co"
+const SUPABASE_KEY  = "";   // "Publishable key" (sb_publishable_...) ou a antiga "anon public"
+const NOME_HOSPITAL = "Hospital Serrano";
+const NOME_APP      = "Gestão de Plantão";
+const LOGO_URL      = "";   // opcional: link de uma imagem da logo do hospital
+/* ===================================================================== */
+
+'use strict';
+
+// ---------- utilidades ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const D = x => (x instanceof Date ? x : new Date(x));
+const ymd = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const hm = d => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const dm = d => `${pad(d.getDate())}/${pad(d.getMonth() + 1)}`;
+const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const dataCurta = d => `${DIAS[d.getDay()]}, ${dm(d)}`;
+const dataLonga = d => `${DIAS[d.getDay()]}, ${dm(d)}/${d.getFullYear()}`;
+const inicioMes = d => new Date(d.getFullYear(), d.getMonth(), 1);
+const addMeses = (d, n) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+const addDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const inicioDia = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const horas = p => (D(p.fim) - D(p.inicio)) / 36e5;
+const fmtH = h => `${String(Math.round(h * 10) / 10).replace('.', ',')}h`;
+const faixa = p => { const a = D(p.inicio), b = D(p.fim); return `${hm(a)} ~ ${hm(b)}${ymd(a) !== ymd(b) ? ' (+1)' : ''}`; };
+const dinheiro = v => (v == null || v === '' ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+const norm = s => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
+const porInicio = (a, b) => D(a.inicio) - D(b.inicio);
+const clone = o => JSON.parse(JSON.stringify(o));
+const agoraISO = () => new Date().toISOString();
+const uid = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+const relativo = iso => {
+  const s = (Date.now() - D(iso)) / 1000;
+  if (s < 3600) return `há ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) return `há ${Math.round(s / 3600)} h`;
+  const d = Math.round(s / 86400);
+  return d < 7 ? `há ${plural(d, 'dia', 'dias')}` : `há ${plural(Math.round(d / 7), 'semana', 'semanas')}`;
+};
+const ATIVOS = ['pendente', 'aguardando_coordenador'];
+const ativa = s => ATIVOS.includes(s.status);
+const UFS = 'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
+const TIPOS = {
+  P24: { nome: 'Plantão 24h', ini: '07:00', h: 24, cor: '#971232' },
+  D12: { nome: 'Diurno 12h', ini: '07:00', h: 12, cor: '#2F7F86' },
+  N12: { nome: 'Noturno 12h', ini: '19:00', h: 12, cor: '#3E3B7A' },
+};
+const corTipo = t => TIPOS[t]?.cor || '#8A7F84';
+const ROTULO = { troca: 'Troca de plantão', passagem: 'Passagem de plantão', anuncio: 'Plantão anunciado' };
+const STATUS = {
+  pendente: ['Aguardando resposta', 'bg-amber-50 text-amber-700'],
+  aguardando_coordenador: ['Aguardando a coordenação', 'bg-ameixa/10 text-ameixa'],
+  concluida: ['Concluído', 'bg-emerald-50 text-emerald-700'],
+  recusada: ['Recusado', 'bg-red-50 text-red-700'],
+  cancelada: ['Cancelado', 'bg-zinc-100 text-zinc-600'],
+};
+const TIPO_MOV = { troca: 'Troca', passagem: 'Passagem', anuncio: 'Anúncio assumido', divisao: 'Divisão', ajuste: 'Ajuste da coordenação' };
+const FALHA = Symbol('falha');
+
+// ---------- ícones (traço simples) ----------
+const ICONES = {
+  home: '<path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2h-4v-7H9v7H5a2 2 0 0 1-2-2z"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  megaphone: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  inbox: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  chevL: '<path d="m15 18-6-6 6-6"/>', chevR: '<path d="m9 18 6-6-6-6"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  swap: '<path d="m21 16-4 4-4-4M17 20V4M3 8l4-4 4 4M7 4v16"/>',
+  scissors: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/>',
+  message: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.2A8.4 8.4 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5z"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M18 17V9M13 17V5M8 17v-3"/>',
+  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>', x: '<path d="M18 6 6 18M6 6l12 12"/>', check: '<path d="M20 6 9 17l-5-5"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  money: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+  building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+  pulse: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  eye: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  alert: '<path d="m21.7 18-8-14a2 2 0 0 0-3.5 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4M12 17h.01"/>',
+  sheet: '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><path d="M14 2v6h6M8 13h2M8 17h2M14 13h2M14 17h2"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8Z"/><path d="M7 7h.01"/>',
+  note: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/>',
+};
+const ic = (n, c = 'w-5 h-5') => `<svg class="${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONES[n] || ''}</svg>`;
+
+// ---------- estado do app ----------
+const S = {
+  modo: null, eu: null, hospital: null, setores: [], perfis: [], plantoes: [], sols: [], cands: [],
+  view: 'carregando', params: {}, pilha: [], janela: null,
+  mes: inicioMes(new Date()), dia: ymd(new Date()), agendaModo: 'geral', filtroSetor: '',
+  pendTab: 'recebidas', anTab: 'disponiveis', admTab: 'plantoes',
+  rel: { mes: inicioMes(new Date()), setor: '', tipo: '', dados: null, carregando: false },
+  troca: null, divisao: null, imp: null, impSetor: '', animou: false, ouvindo: false, ocupado: false,
+};
+const perfil = id => S.perfis.find(p => p.id === id) || (S.eu && S.eu.id === id ? S.eu : null);
+const setor = id => S.setores.find(s => s.id === id);
+const plantao = id => S.plantoes.find(p => p.id === id);
+const nomeCurto = p => p ? (p.nome_na_escala || (p.nome || '').split(' ').slice(0, 2).join(' ') || p.email || 'Sem nome') : 'Vago';
+const porNome = (a, b) => nomeCurto(a).localeCompare(nomeCurto(b), 'pt');
+const souCoord = () => S.eu?.papel === 'coordenador';
+const ehMeu = p => !!S.eu && p.medico_id === S.eu.id;
+const solAtiva = pid => S.sols.find(s => ativa(s) && (s.plantao_id === pid || s.plantao_contra_id === pid));
+const expirada = s => { const p = plantao(s.plantao_id); return ativa(s) && p && D(p.inicio) <= new Date(); };
+const apto = (m, sid) => !!m && (m.setores || []).includes(sid);
+
+// ---------- erros em português ----------
+function traduz(e) {
+  const m = (e && (e.message || e.error_description)) || String(e);
+  const t = [
+    [/Invalid login credentials/i, 'E-mail ou senha incorretos.'],
+    [/Email not confirmed/i, 'Conta ainda não confirmada. A coordenação precisa marcar "Auto Confirm User" ao criar o usuário.'],
+    [/should be at least/i, 'A senha precisa ter pelo menos 6 caracteres.'],
+    [/should be different/i, 'A nova senha precisa ser diferente da atual.'],
+    [/Failed to fetch|NetworkError|Load failed/i, 'Sem conexão com o servidor. Verifique a internet.'],
+    [/perfis_nome_escala_unico/i, 'Já existe um médico com esse nome na escala.'],
+    [/duplicate key/i, 'Esse registro já existe.'],
+    [/row-level security|permission denied/i, 'Você não tem permissão para esta ação.'],
+    [/does not exist|Could not find the (table|function)|schema cache/i, 'O banco ainda não foi instalado ou está desatualizado. Rode o script SQL no Supabase.'],
+    [/JWT|token/i, 'Sua sessão expirou. Entre novamente.'],
+  ].find(([r]) => r.test(m));
+  return new Error(t ? t[1] : m);
+}
+
+// =====================================================================
+//  CAMADA DE DADOS 1: SUPABASE (dados reais, compartilhados em tempo real)
+// =====================================================================
+let sb = null, api = null;
+async function q(pr) { const { data, error } = await pr; if (error) throw traduz(error); return data; }
+async function todos(montar) {
+  let out = [], i = 0;
+  for (;;) { const d = await q(montar().range(i, i + 999)); out = out.concat(d || []); if (!d || d.length < 1000) return out; i += 1000; }
+}
+const SupaAPI = {
+  async sessao() { const { data } = await sb.auth.getSession(); return data.session?.user || null; },
+  async login(email, senha) { const { data, error } = await sb.auth.signInWithPassword({ email, password: senha }); if (error) throw traduz(error); return data.user; },
+  async sair() { try { sb.removeAllChannels(); } catch (e) {} await sb.auth.signOut(); },
+  async trocarSenha(s) { const { error } = await sb.auth.updateUser({ password: s }); if (error) throw traduz(error); },
+  async perfilDe(id) { return q(sb.from('perfis').select('*').eq('id', id).maybeSingle()); },
+  async carregar(de, ate) {
+    const desde = addDias(new Date(), -60).toISOString();
+    const [hospital, setores, perfis, plantoes, ativas, recentes] = await Promise.all([
+      q(sb.from('hospitais').select('*').limit(1).maybeSingle()),
+      q(sb.from('setores').select('*').order('nome')),
+      todos(() => sb.from('perfis').select('*').order('nome')),
+      todos(() => sb.from('plantoes').select('*').gte('inicio', de.toISOString()).lt('inicio', ate.toISOString()).order('inicio')),
+      todos(() => sb.from('solicitacoes').select('*').in('status', ATIVOS)),
+      todos(() => sb.from('solicitacoes').select('*').gte('criado_em', desde).order('criado_em', { ascending: false })),
+    ]);
+    const mapa = new Map(); [...ativas, ...recentes].forEach(s => mapa.set(s.id, s));
+    const sols = [...mapa.values()].sort((a, b) => D(b.criado_em) - D(a.criado_em));
+    const tem = new Set(plantoes.map(p => p.id));
+    const faltam = [...new Set(sols.flatMap(s => [s.plantao_id, s.plantao_contra_id]).filter(id => id && !tem.has(id)))];
+    for (let i = 0; i < faltam.length; i += 100) plantoes.push(...await q(sb.from('plantoes').select('*').in('id', faltam.slice(i, i + 100))));
+    const anuncios = sols.filter(s => s.tipo === 'anuncio').map(s => s.id);
+    let cands = [];
+    for (let i = 0; i < anuncios.length; i += 100) cands = cands.concat(await q(sb.from('candidaturas').select('*').in('solicitacao_id', anuncios.slice(i, i + 100))));
+    return { hospital, setores, perfis, plantoes, sols, cands };
+  },
+  async plantoesPeriodo(de, ate) { return todos(() => sb.from('plantoes').select('*').gte('inicio', de.toISOString()).lt('inicio', ate.toISOString()).order('inicio')); },
+  async historico(de, ate) { return todos(() => sb.from('historico').select('*').gte('inicio', de.toISOString()).lt('inicio', ate.toISOString()).order('inicio')); },
+  async rpc(nome, args) { return q(sb.rpc(nome, args)); },
+  async salvar(t, row) {
+    if (row.id) { const { id, ...resto } = row; return q(sb.from(t).update(resto).eq('id', id).select().single()); }
+    return q(sb.from(t).insert(row).select().single());
+  },
+  async excluir(t, id) { return q(sb.from(t).delete().eq('id', id)); },
+  async inserirVarios(t, rows) { for (let i = 0; i < rows.length; i += 500) await q(sb.from(t).insert(rows.slice(i, i + 500))); },
+  ouvir(cb) {
+    const ch = sb.channel('escala');
+    ['plantoes', 'solicitacoes', 'candidaturas', 'perfis', 'setores'].forEach(t => ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, cb));
+    ch.subscribe();
+  },
+};
+
+// =====================================================================
+//  CAMADA DE DADOS 2: DEMONSTRAÇÃO (tudo na memória, some ao recarregar)
+// =====================================================================
+const DB = { hospitais: [], setores: [], perfis: [], plantoes: [], solicitacoes: [], candidaturas: [], historico: [] };
+let DEMO = [];
+const ERR = m => { throw new Error(m); };
+const dP = id => DB.plantoes.find(x => x.id === id);
+const dApto = (m, s) => { const p = DB.perfis.find(x => x.id === m); return !!p && p.ativo && p.setores.includes(s); };
+const dConf = (m, i, f, ign = []) => DB.plantoes.some(x => x.medico_id === m && !ign.includes(x.id) && D(x.inicio) < D(f) && D(x.fim) > D(i));
+const dExige = pid => !!DB.setores.find(s => s.id === dP(pid)?.setor_id)?.exige_aprovacao;
+const novaSol = o => ({ id: uid(), hospital_id: DB.hospitais[0].id, plantao_contra_id: null, destinatario_id: null, status: 'pendente', mensagem: null, motivo: null, decidido_por: null, aceito_em: null, concluido_em: null, criado_em: agoraISO(), ...o });
+
+function dExec(s, por) {
+  const pl = dP(s.plantao_id);
+  if (D(pl.inicio) <= new Date()) ERR('O plantão já começou; este pedido não vale mais.');
+  if (!(s.tipo === 'anuncio' && !pl.medico_id) && pl.medico_id !== s.solicitante_id) ERR('O plantão mudou de dono desde o pedido.');
+  if (!s.destinatario_id) ERR('Falta definir quem assume o plantão.');
+  const hist = (p, de, para) => DB.historico.push({ id: uid(), hospital_id: s.hospital_id, tipo: s.tipo, plantao_id: p.id, solicitacao_id: s.id, de_medico_id: de, para_medico_id: para, setor_id: p.setor_id, inicio: p.inicio, fim: p.fim, detalhes: null, feito_por: por, criado_em: agoraISO() });
+  let pc = null;
+  if (s.tipo === 'troca') {
+    pc = dP(s.plantao_contra_id);
+    if (!pc || pc.medico_id !== s.destinatario_id || D(pc.inicio) <= new Date()) ERR('O plantão do colega mudou desde o pedido.');
+    if (dConf(s.destinatario_id, pl.inicio, pl.fim, [pc.id]) || dConf(s.solicitante_id, pc.inicio, pc.fim, [pl.id])) ERR('Conflito de horário: alguém já tem plantão nesse período.');
+    hist(pl, s.solicitante_id, s.destinatario_id); hist(pc, s.destinatario_id, s.solicitante_id);
+    pl.medico_id = s.destinatario_id; pc.medico_id = s.solicitante_id; pl.status = pc.status = 'designado';
+  } else {
+    if (dConf(s.destinatario_id, pl.inicio, pl.fim)) ERR('Quem vai assumir já tem plantão nesse horário.');
+    hist(pl, pl.medico_id, s.destinatario_id); pl.medico_id = s.destinatario_id; pl.status = 'designado';
+  }
+  s.status = 'concluida'; s.concluido_em = agoraISO(); s.decidido_por = s.decidido_por || por;
+  const ids = [pl.id, pc && pc.id].filter(Boolean);
+  DB.solicitacoes.forEach(o => { if (o.id !== s.id && ativa(o) && ids.some(x => o.plantao_id === x || o.plantao_contra_id === x)) { o.status = 'cancelada'; o.motivo = 'O plantão foi movimentado por outro pedido.'; } });
+}
+const voltaStatus = p => { if (p && p.status === 'anunciado') p.status = p.medico_id ? 'designado' : 'vago'; };
+
+const DemoRPC = {
+  criar_solicitacao(eu, a) {
+    if (!['troca', 'passagem', 'anuncio'].includes(a.p_tipo)) ERR('Tipo de pedido inválido.');
+    const pl = dP(a.p_plantao); if (!pl) ERR('Plantão não encontrado.');
+    if (D(pl.inicio) <= new Date()) ERR('Esse plantão já começou.');
+    if (!pl.medico_id) { if (!(a.p_tipo === 'anuncio' && eu.papel === 'coordenador')) ERR('Plantão vago: só a coordenação pode anunciar.'); }
+    else if (pl.medico_id !== eu.id) ERR('Este plantão não é seu.');
+    let pc = null;
+    if (a.p_tipo !== 'anuncio') {
+      if (!a.p_destinatario || a.p_destinatario === eu.id) ERR('Escolha um colega.');
+      if (!dApto(a.p_destinatario, pl.setor_id)) ERR('O colega não está habilitado neste setor.');
+    }
+    if (a.p_tipo === 'troca') {
+      pc = dP(a.p_plantao_contra);
+      if (!pc || pc.medico_id !== a.p_destinatario) ERR('Escolha um plantão do colega para trocar.');
+      if (D(pc.inicio) <= new Date()) ERR('O plantão do colega já começou.');
+      if (!dApto(eu.id, pc.setor_id)) ERR('Você não está habilitado no setor do plantão do colega.');
+      if (dConf(a.p_destinatario, pl.inicio, pl.fim, [pc.id])) ERR('O colega já tem plantão no seu horário.');
+      if (dConf(eu.id, pc.inicio, pc.fim, [pl.id])) ERR('Você já tem plantão no horário do colega.');
+    } else if (a.p_tipo === 'passagem' && dConf(a.p_destinatario, pl.inicio, pl.fim)) ERR('O colega já tem plantão nesse horário.');
+    if (DB.solicitacoes.some(s => ativa(s) && (s.plantao_id === pl.id || (pc && s.plantao_contra_id === pc.id)))) ERR('Já existe um pedido em andamento para este plantão.');
+    const s = novaSol({ tipo: a.p_tipo, plantao_id: pl.id, plantao_contra_id: pc ? pc.id : null, solicitante_id: eu.id, destinatario_id: a.p_tipo === 'anuncio' ? null : a.p_destinatario, mensagem: (a.p_mensagem || '').trim() || null });
+    DB.solicitacoes.push(s); if (a.p_tipo === 'anuncio') pl.status = 'anunciado';
+    return s.id;
+  },
+  responder_solicitacao(eu, a) {
+    const s = DB.solicitacoes.find(x => x.id === a.p_solicitacao);
+    if (!s || s.tipo === 'anuncio' || s.destinatario_id !== eu.id) ERR('Pedido não encontrado.');
+    if (s.status !== 'pendente') ERR('Este pedido já foi respondido.');
+    if (!a.p_aceitar) { Object.assign(s, { status: 'recusada', motivo: (a.p_motivo || '').trim() || null, decidido_por: eu.id }); return 'recusada'; }
+    if (dExige(s.plantao_id) || (s.plantao_contra_id && dExige(s.plantao_contra_id))) { s.aceito_em = agoraISO(); s.status = 'aguardando_coordenador'; return 'aguardando_coordenador'; }
+    dExec(s, eu.id); s.aceito_em = agoraISO(); return 'concluida';
+  },
+  aprovar_solicitacao(eu, a) {
+    if (eu.papel !== 'coordenador') ERR('Só a coordenação aprova pedidos.');
+    const s = DB.solicitacoes.find(x => x.id === a.p_solicitacao);
+    if (!s || s.status !== 'aguardando_coordenador') ERR('Não há nada para aprovar neste pedido.');
+    if (!a.p_aprovar) { Object.assign(s, { status: 'recusada', decidido_por: eu.id, motivo: (a.p_motivo || '').trim() || 'Recusado pela coordenação.' }); voltaStatus(dP(s.plantao_id)); return 'recusada'; }
+    s.decidido_por = eu.id; dExec(s, eu.id); return 'concluida';
+  },
+  candidatar(eu, a) {
+    const s = DB.solicitacoes.find(x => x.id === a.p_solicitacao);
+    if (!s || s.tipo !== 'anuncio' || s.status !== 'pendente') ERR('Este anúncio não está mais disponível.');
+    const minha = DB.candidaturas.find(c => c.solicitacao_id === s.id && c.medico_id === eu.id);
+    if (a.p_entrar === false) { if (minha && minha.status === 'ativa') minha.status = 'cancelada'; return; }
+    if (s.solicitante_id === eu.id) ERR('O anúncio é seu.');
+    const pl = dP(s.plantao_id);
+    if (pl.medico_id === eu.id) ERR('O plantão já é seu.');
+    if (!dApto(eu.id, pl.setor_id)) ERR('Você não está habilitado neste setor.');
+    if (dConf(eu.id, pl.inicio, pl.fim)) ERR('Você já tem plantão nesse horário.');
+    if (minha) Object.assign(minha, { status: 'ativa', criado_em: agoraISO() });
+    else DB.candidaturas.push({ id: uid(), hospital_id: s.hospital_id, solicitacao_id: s.id, medico_id: eu.id, status: 'ativa', criado_em: agoraISO() });
+  },
+  escolher_candidato(eu, a) {
+    const s = DB.solicitacoes.find(x => x.id === a.p_solicitacao);
+    if (!s || s.tipo !== 'anuncio' || s.status !== 'pendente') ERR('Este anúncio não está mais disponível.');
+    if (s.solicitante_id !== eu.id && eu.papel !== 'coordenador') ERR('Só quem anunciou ou a coordenação escolhe o candidato.');
+    if (!DB.candidaturas.some(c => c.solicitacao_id === s.id && c.medico_id === a.p_medico && c.status === 'ativa')) ERR('Esse candidato não está mais disponível.');
+    const pl = dP(s.plantao_id);
+    if (dConf(a.p_medico, pl.inicio, pl.fim)) ERR('Esse candidato já tem plantão nesse horário.');
+    s.destinatario_id = a.p_medico; s.aceito_em = agoraISO();
+    DB.candidaturas.filter(c => c.solicitacao_id === s.id && c.status === 'ativa').forEach(c => { c.status = c.medico_id === a.p_medico ? 'escolhida' : 'nao_escolhida'; });
+    if (dExige(s.plantao_id) && eu.papel !== 'coordenador') { s.status = 'aguardando_coordenador'; return 'aguardando_coordenador'; }
+    s.decidido_por = eu.id; dExec(s, eu.id); return 'concluida';
+  },
+  cancelar_solicitacao(eu, a) {
+    const s = DB.solicitacoes.find(x => x.id === a.p_solicitacao);
+    if (!s || (s.solicitante_id !== eu.id && eu.papel !== 'coordenador')) ERR('Pedido não encontrado.');
+    if (!ativa(s)) ERR('Este pedido já foi encerrado.');
+    s.status = 'cancelada'; s.decidido_por = eu.id; voltaStatus(dP(s.plantao_id));
+    DB.candidaturas.forEach(c => { if (c.solicitacao_id === s.id && c.status === 'ativa') c.status = 'cancelada'; });
+  },
+  dividir_plantao(eu, a) {
+    const pl = dP(a.p_plantao); if (!pl) ERR('Plantão não encontrado.');
+    const coord = eu.papel === 'coordenador';
+    if (pl.medico_id !== eu.id && !coord) ERR('Este plantão não é seu.');
+    const st = DB.setores.find(s => s.id === pl.setor_id);
+    if (!st.permite_divisao && !coord) ERR('A divisão não é permitida neste setor.');
+    if (D(pl.inicio) <= new Date() && !coord) ERR('Esse plantão já começou.');
+    if (DB.solicitacoes.some(s => ativa(s) && (s.plantao_id === pl.id || s.plantao_contra_id === pl.id))) ERR('Cancele o pedido em andamento antes de dividir.');
+    const ponto = D(a.p_ponto);
+    if (ponto - D(pl.inicio) < 36e5 || D(pl.fim) - ponto < 36e5) ERR('Cada parte precisa ter pelo menos 1 hora.');
+    let v1 = null, v2 = null;
+    if (pl.valor != null) { v1 = Math.round(pl.valor * (ponto - D(pl.inicio)) / (D(pl.fim) - D(pl.inicio)) * 100) / 100; v2 = Math.round((pl.valor - v1) * 100) / 100; }
+    DB.historico.push({ id: uid(), hospital_id: pl.hospital_id, tipo: 'divisao', plantao_id: pl.id, solicitacao_id: null, de_medico_id: pl.medico_id, para_medico_id: pl.medico_id, setor_id: pl.setor_id, inicio: pl.inicio, fim: pl.fim, detalhes: `Dividido às ${dm(ponto)} ${hm(ponto)}`, feito_por: eu.id, criado_em: agoraISO() });
+    const novo = { ...clone(pl), id: uid(), inicio: ponto.toISOString(), valor: v2, origem_id: pl.id, checkin_em: null, checkout_em: null, status: pl.medico_id ? 'designado' : 'vago', criado_em: agoraISO() };
+    pl.fim = ponto.toISOString(); pl.valor = v1; DB.plantoes.push(novo);
+    return novo.id;
+  },
+  registrar_presenca(eu, a) {
+    const pl = dP(a.p_plantao); if (!pl || pl.medico_id !== eu.id) ERR('Plantão não encontrado.');
+    const agora = new Date();
+    if (a.p_acao === 'entrada') {
+      if (agora < D(pl.inicio) - 2 * 36e5 || agora > D(pl.fim)) ERR('A entrada pode ser registrada de 2h antes do início até o fim do plantão.');
+      pl.checkin_em = pl.checkin_em || agoraISO();
+    } else { if (!pl.checkin_em) ERR('Registre a entrada primeiro.'); pl.checkout_em = pl.checkout_em || agoraISO(); }
+  },
+  atualizar_meu_perfil(eu, a) {
+    if (!(a.p_nome || '').trim() || !(a.p_crm || '').trim()) ERR('Preencha nome completo e CRM.');
+    Object.assign(eu, { nome: a.p_nome.trim(), crm: a.p_crm.trim(), uf_crm: (a.p_uf || '').toUpperCase(), especialidade: (a.p_especialidade || '').trim() || null, telefone: (a.p_telefone || '').trim() || null, cadastro_completo: true, aceite_lgpd_em: eu.aceite_lgpd_em || agoraISO() });
+  },
+  redefinir_senha(eu) { if (eu.papel !== 'coordenador') ERR('Só a coordenação redefine senhas.'); },
+};
+
+const Demo = {
+  usuario: null,
+  async sessao() { return this.usuario ? { id: this.usuario } : null; },
+  async login(email) { const p = DB.perfis.find(x => norm(x.email) === norm(email)); if (!p) ERR('Na demonstração, use um dos acessos rápidos.'); this.usuario = p.id; return { id: p.id }; },
+  async sair() { this.usuario = null; },
+  async trocarSenha() {},
+  async perfilDe(id) { const p = DB.perfis.find(x => x.id === id); return p ? clone(p) : null; },
+  async carregar(de, ate) {
+    const eu = DB.perfis.find(p => p.id === this.usuario); const coord = eu.papel === 'coordenador';
+    const desde = addDias(new Date(), -60);
+    const sols = DB.solicitacoes.filter(s => (coord || s.tipo === 'anuncio' || s.solicitante_id === eu.id || s.destinatario_id === eu.id) && (ativa(s) || D(s.criado_em) >= desde))
+      .sort((a, b) => D(b.criado_em) - D(a.criado_em));
+    const ids = new Set(sols.flatMap(s => [s.plantao_id, s.plantao_contra_id]));
+    const plantoes = DB.plantoes.filter(p => (D(p.inicio) >= de && D(p.inicio) < ate) || ids.has(p.id)).sort(porInicio);
+    const anuncios = new Set(sols.filter(s => s.tipo === 'anuncio').map(s => s.id));
+    return clone({ hospital: DB.hospitais[0], setores: DB.setores, perfis: DB.perfis, plantoes, sols, cands: DB.candidaturas.filter(c => anuncios.has(c.solicitacao_id)) });
+  },
+  async plantoesPeriodo(de, ate) { return clone(DB.plantoes.filter(p => D(p.inicio) >= de && D(p.inicio) < ate).sort(porInicio)); },
+  async historico(de, ate) {
+    const eu = DB.perfis.find(p => p.id === this.usuario); const coord = eu.papel === 'coordenador';
+    return clone(DB.historico.filter(h => D(h.inicio) >= de && D(h.inicio) < ate && (coord || [h.de_medico_id, h.para_medico_id, h.feito_por].includes(eu.id))).sort(porInicio));
+  },
+  async rpc(nome, a) {
+    const eu = DB.perfis.find(p => p.id === this.usuario);
+    if (!eu || !eu.ativo) ERR('Seu acesso não está ativo. Fale com a coordenação.');
+    return DemoRPC[nome](eu, a || {});
+  },
+  async salvar(t, row) {
+    const tab = DB[t]; const atual = row.id && tab.find(x => x.id === row.id);
+    if (t === 'perfis' && row.nome_na_escala && DB.perfis.some(p => p.id !== row.id && norm(p.nome_na_escala) === norm(row.nome_na_escala))) ERR('Já existe um médico com esse nome na escala.');
+    if (t === 'setores' && DB.setores.some(s => s.id !== row.id && norm(s.nome) === norm(row.nome))) ERR('Esse registro já existe.');
+    if (atual) { Object.assign(atual, row); return clone(atual); }
+    const novo = { criado_em: agoraISO(), ...row, id: uid() }; tab.push(novo); return clone(novo);
+  },
+  async excluir(t, id) {
+    DB[t] = DB[t].filter(x => x.id !== id);
+    if (t === 'plantoes') { DB.solicitacoes = DB.solicitacoes.filter(s => s.plantao_id !== id && s.plantao_contra_id !== id); DB.historico.forEach(h => { if (h.plantao_id === id) h.plantao_id = null; }); }
+  },
+  async inserirVarios(t, rows) { rows.forEach(r => DB[t].push({ criado_em: agoraISO(), checkin_em: null, checkout_em: null, origem_id: null, ...r, id: uid() })); },
+  ouvir() {},
+};
+
+function seedDemo() {
+  const H = { id: uid(), nome: NOME_HOSPITAL || 'Hospital', cidade: 'Nova Friburgo/RJ', criado_em: agoraISO() };
+  const CM = { id: uid(), hospital_id: H.id, nome: 'Clínica Médica', cor: '#971232', exige_aprovacao: false, permite_divisao: true, ativo: true };
+  const PS = { id: uid(), hospital_id: H.id, nome: 'Pronto-Socorro', cor: '#7E3A87', exige_aprovacao: true, permite_divisao: true, ativo: true };
+  let n = 0;
+  const med = (nome, escala, papel, setores, esp) => ({ id: uid(), hospital_id: H.id, email: norm(escala).replace(/[^a-z]+/g, '.') + '@demo.app', nome, nome_na_escala: escala, crm: String(52000 + (++n) * 137), uf_crm: 'RJ', especialidade: esp, telefone: '', papel, setores, ativo: true, cadastro_completo: true, criado_em: agoraISO() });
+  const co = med('Coordenação da Escala', 'Coordenação', 'coordenador', [CM.id, PS.id], 'Clínica Médica');
+  const mi = med('Maria Isabel', 'Maria Isabel', 'medico', [CM.id], 'Clínica Médica');
+  const pe = med('Pedro', 'Pedro', 'medico', [CM.id, PS.id], 'Clínica Médica');
+  const ka = med('Kaio', 'Kaio', 'medico', [CM.id, PS.id], 'Clínica Médica');
+  const ma = med('Manuelle', 'Manuelle', 'medico', [CM.id, PS.id], 'Emergência');
+  Object.assign(DB, { hospitais: [H], setores: [CM, PS], perfis: [co, mi, pe, ka, ma], plantoes: [], solicitacoes: [], candidaturas: [], historico: [] });
+
+  const hoje = new Date();
+  const add = (st, m, d, h, dur, tipo, valor) => {
+    const i = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h);
+    const p = { id: uid(), hospital_id: H.id, setor_id: st.id, medico_id: m ? m.id : null, inicio: i.toISOString(), fim: new Date(i.getTime() + dur * 36e5).toISOString(), tipo, valor, status: m ? 'designado' : 'vago', origem_id: null, checkin_em: null, checkout_em: null, observacao: null, criado_em: agoraISO() };
+    DB.plantoes.push(p); return p;
+  };
+  const rot = [mi, pe, mi, ka, mi, pe, ka];
+  for (let d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1), k = 0; d < new Date(hoje.getFullYear(), hoje.getMonth() + 2, 1); d = addDias(d, 1), k++) {
+    add(CM, rot[k % 7], d, 7, 24, 'P24', 1800);
+    add(PS, k % 11 === 5 ? null : (k % 2 === 0 ? ma : co), d, 7, 12, 'D12', 1100);
+    add(PS, k % 2 === 0 ? co : ma, d, 19, 12, 'N12', 1300);
+  }
+  const agora = Date.now();
+  const usados = new Set();
+  const achar = (m, dias, st = CM) => { const p = DB.plantoes.find(x => x.medico_id === m.id && x.setor_id === st.id && !usados.has(x.id) && D(x.inicio).getTime() > agora + dias * 864e5); if (p) usados.add(p.id); return p; };
+  const pa = achar(mi, 4);
+  if (pa) { pa.status = 'anunciado'; const s = novaSol({ tipo: 'anuncio', plantao_id: pa.id, solicitante_id: mi.id, mensagem: 'Congresso nesse dia. Quem puder, agradeço!', criado_em: new Date(agora - 26 * 36e5).toISOString() }); DB.solicitacoes.push(s); DB.candidaturas.push({ id: uid(), hospital_id: H.id, solicitacao_id: s.id, medico_id: ka.id, status: 'ativa', criado_em: new Date(agora - 20 * 36e5).toISOString() }); }
+  const pk = achar(ka, 2), pp = achar(pe, 7);
+  if (pk && pp) DB.solicitacoes.push(novaSol({ tipo: 'troca', plantao_id: pk.id, plantao_contra_id: pp.id, solicitante_id: ka.id, destinatario_id: pe.id, mensagem: 'Consegue trocar comigo? Tenho um compromisso de família.', criado_em: new Date(agora - 5 * 36e5).toISOString() }));
+  const vaga = DB.plantoes.find(p => !p.medico_id && D(p.inicio).getTime() > agora + 864e5);
+  if (vaga) { vaga.status = 'anunciado'; DB.solicitacoes.push(novaSol({ tipo: 'anuncio', plantao_id: vaga.id, solicitante_id: co.id, mensagem: 'Vaga aberta no Pronto-Socorro.' })); usados.add(vaga.id); }
+  // movimentações já concluídas neste mês (para o relatório não começar vazio)
+  const doMes = m => DB.plantoes.find(p => p.medico_id === m.id && p.setor_id === CM.id && !usados.has(p.id) && D(p.inicio).getMonth() === hoje.getMonth() && D(p.inicio).getFullYear() === hoje.getFullYear());
+  const hist = (tipo, p, de, para, por) => DB.historico.push({ id: uid(), hospital_id: H.id, tipo, plantao_id: p.id, solicitacao_id: null, de_medico_id: de.id, para_medico_id: para.id, setor_id: p.setor_id, inicio: p.inicio, fim: p.fim, detalhes: null, feito_por: por.id, criado_em: new Date(D(p.inicio) - 3 * 864e5).toISOString() });
+  const p1 = doMes(mi); if (p1) { usados.add(p1.id); hist('passagem', p1, mi, pe, pe); p1.medico_id = pe.id; }
+  const p2 = doMes(pe), p3 = doMes(ka);
+  if (p2 && p3) { usados.add(p2.id); usados.add(p3.id); hist('troca', p2, pe, ka, ka); hist('troca', p3, ka, pe, ka); p2.medico_id = ka.id; p3.medico_id = pe.id; }
+  DEMO = [
+    { id: co.id, rot: 'Coordenação', sub: 'Aprova pedidos, edita a escala e importa Excel' },
+    { id: pe.id, rot: 'Pedro', sub: 'Médico: tem uma proposta de troca esperando' },
+    { id: ka.id, rot: 'Kaio', sub: 'Médico: fez a proposta e se candidatou a um anúncio' },
+  ];
+}
+
+// =====================================================================
+//  COMPONENTES
+// =====================================================================
+const CORES_AV = ['#971232', '#7E3A87', '#C23A6B', '#9A5B1E', '#2F7F86', '#4E5AA8'];
+function avatar(p, tam = 'w-10 h-10 text-[14px]') {
+  if (!p) return `<div class="${tam} grid shrink-0 place-items-center rounded-full bg-linha font-bold text-grafite/50">${ic('user', 'w-1/2 h-1/2')}</div>`;
+  const ini = nomeCurto(p).split(/\s+/).filter(Boolean).map(x => x[0]).slice(0, 2).join('').toUpperCase();
+  let h = 0; for (const ch of String(p.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `<div class="${tam} grid shrink-0 place-items-center rounded-full font-bold text-white" style="background:${CORES_AV[h % CORES_AV.length]}">${esc(ini)}</div>`;
+}
+function marca(c = 'w-12 h-12') {
+  if (LOGO_URL) return `<img src="${esc(LOGO_URL)}" alt="" class="${c} rounded-2xl bg-white object-contain p-1">`;
+  return `<div class="${c} grid shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-ameixa via-vinho-600 to-magenta text-white shadow-sm"><svg viewBox="0 0 24 24" class="h-3/5 w-3/5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13h4l2.5-6 4 11 3-7 1.5 2H22"/></svg></div>`;
+}
+function topo(titulo, { voltar = false, direita = '' } = {}) {
+  return `<header class="sticky top-0 z-20 bg-vinho-700 text-white safe-t">
+    <div class="mx-auto flex h-14 max-w-3xl items-center gap-1 px-2">
+      ${voltar ? `<button onclick="history.back()" class="grid h-11 w-11 place-items-center rounded-full hover:bg-white/10" aria-label="Voltar">${ic('chevL', 'w-6 h-6')}</button>` : '<div class="w-3"></div>'}
+      <h1 class="min-w-0 flex-1 truncate text-[17px] font-bold">${titulo}</h1>${direita}
+    </div></header>`;
+}
+const main = (html, extra = '') => `<main class="mx-auto max-w-3xl px-4 py-4 ${extra}">${html}</main>`;
+const secao = (titulo, html) => `<h2 class="mb-2 mt-6 text-[15px] font-bold text-grafite/80">${titulo}</h2>${html}`;
+const vazio = (texto, acao = '') => `<div class="card px-5 py-8 text-center text-[15px] text-grafite/60">${texto}${acao ? `<div class="mt-4">${acao}</div>` : ''}</div>`;
+const abas = (itens, atual, fn) => `<div class="sem-barra -mx-4 mb-4 flex gap-2 overflow-x-auto px-4">${itens.map(([v, t, n]) =>
+  `<button onclick="${fn}('${v}')" class="chip ${atual === v ? 'chip-on' : ''}">${t}${n ? `<span class="ml-1 rounded-full ${atual === v ? 'bg-white/25' : 'bg-vinho-50 text-vinho-700'} px-1.5 text-[11px]">${n}</span>` : ''}</button>`).join('')}</div>`;
+const statusTag = st => `<span class="tag ${STATUS[st][1]}">${STATUS[st][0]}</span>`;
+const miniPlantao = p => p ? `<div class="flex items-center gap-2 text-[14px]"><span class="h-2 w-2 shrink-0 rounded-full" style="background:${corTipo(p.tipo)}"></span><span><b>${dataCurta(D(p.inicio))}</b> ${faixa(p)} <span class="text-grafite/55">${fmtH(horas(p))} · ${esc(setor(p.setor_id)?.nome || '')}</span></span></div>` : '<div class="text-[14px] text-grafite/50">Plantão fora do período carregado</div>';
+
+function cardPlantao(p, { comMedico = false } = {}) {
+  const agora = new Date(); const andando = D(p.inicio) <= agora && D(p.fim) > agora; const sol = solAtiva(p.id);
+  const extra = andando ? '<span class="tag bg-emerald-50 text-emerald-700">Em andamento</span>'
+    : p.status === 'anunciado' ? '<span class="tag bg-amber-50 text-amber-700">Anunciado</span>'
+    : sol ? `<span class="tag bg-vinho-50 text-vinho-700">${sol.tipo === 'troca' ? 'Troca' : 'Passagem'} em andamento</span>`
+    : !p.medico_id ? '<span class="tag bg-zinc-100 text-zinc-600">Vago</span>' : '';
+  return `<button onclick="ir('plantao',{id:'${p.id}'})" class="card flex w-full items-stretch overflow-hidden text-left transition hover:ring-vinho-200">
+    <div class="w-1.5 shrink-0" style="background:${corTipo(p.tipo)}"></div>
+    <div class="tnum flex w-[4.5rem] shrink-0 flex-col items-center justify-center border-r border-linha py-3"><span class="text-[16px] font-bold">${hm(D(p.inicio))}</span><span class="text-[13px] text-grafite/55">${hm(D(p.fim))}</span></div>
+    <div class="min-w-0 flex-1 px-3 py-2.5">
+      <div class="text-[13px] font-semibold text-grafite/60">${dataCurta(D(p.inicio))} · ${fmtH(horas(p))}</div>
+      <div class="truncate text-[16px] font-bold">${esc(setor(p.setor_id)?.nome || 'Setor')}</div>
+      <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-grafite/60">${comMedico ? esc(nomeCurto(perfil(p.medico_id))) : esc(S.hospital?.nome || NOME_HOSPITAL)} ${extra}</div>
+    </div><div class="grid place-items-center pr-3 text-grafite/30">${ic('chevR', 'w-4 h-4')}</div></button>`;
+}
+
+function contarRecebidas() { return S.sols.filter(s => s.tipo !== 'anuncio' && s.status === 'pendente' && s.destinatario_id === S.eu?.id && !expirada(s)).length; }
+function contarPendencias() { return contarRecebidas() + (souCoord() ? S.sols.filter(s => s.status === 'aguardando_coordenador' && !expirada(s)).length : 0); }
+function anunciosDisponiveis() {
+  return S.sols.filter(s => s.tipo === 'anuncio' && s.status === 'pendente' && s.solicitante_id !== S.eu.id && !expirada(s)
+    && plantao(s.plantao_id) && plantao(s.plantao_id).medico_id !== S.eu.id && apto(S.eu, plantao(s.plantao_id).setor_id));
+}
+function contarAnuncios() { return anunciosDisponiveis().filter(s => !S.cands.some(c => c.solicitacao_id === s.id && c.medico_id === S.eu.id && c.status === 'ativa')).length; }
+
+function shell(conteudo) {
+  const itens = [['home', 'home', 'Início'], ['agenda', 'calendar', 'Agenda'], ['anuncios', 'megaphone', 'Anúncios', contarAnuncios()], ['pendencias', 'inbox', 'Pendências', contarPendencias()], ['mais', 'menu', 'Mais']];
+  const raiz = { home: 'home', agenda: 'agenda', anuncios: 'anuncios', pendencias: 'pendencias' }[S.view] || (['plantao', 'trocar', 'dividir'].includes(S.view) ? (S.pilha[0]?.view === 'home' && S.pilha.length === 1 ? 'home' : (S.pilha[S.pilha.length - 1]?.view || 'agenda')) : 'mais');
+  const nav = itens.map(([v, i, t, b]) => `<button onclick="irRaiz('${v}')" class="relative flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] font-semibold lg:flex-none lg:flex-row lg:gap-3 lg:rounded-xl lg:px-4 lg:py-3 lg:text-[15px] ${raiz === v ? 'text-vinho-600 lg:bg-vinho-50' : 'text-grafite/55 hover:text-grafite'}">
+    <span class="relative">${ic(i, 'w-6 h-6')}${b ? `<span class="absolute -right-2.5 -top-1.5 min-w-[18px] rounded-full bg-magenta px-1 text-center text-[10px] font-bold leading-[18px] text-white">${b}</span>` : ''}</span>${t}</button>`).join('');
+  return `<div class="min-h-screen pb-24 lg:pb-8 lg:pl-64">${conteudo}</div>
+  <nav class="fixed inset-x-0 bottom-0 z-30 border-t border-linha bg-white/95 backdrop-blur safe-b lg:inset-y-0 lg:right-auto lg:w-64 lg:border-r lg:border-t-0 lg:px-3 lg:pt-6">
+    <div class="hidden lg:mb-6 lg:flex lg:items-center lg:gap-3 lg:px-2">${marca('w-11 h-11')}<div><div class="font-extrabold leading-tight text-vinho-700">${esc(NOME_APP)}</div><div class="text-[13px] text-grafite/60">${esc(S.hospital?.nome || NOME_HOSPITAL)}</div></div></div>
+    <div class="mx-auto flex max-w-lg lg:max-w-none lg:flex-col lg:gap-1">${nav}</div>
+  </nav>`;
+}
+
+// =====================================================================
+//  TELAS
+// =====================================================================
+const vCarregando = () => `<div class="grid min-h-screen place-items-center bg-vinho-800"><div class="flex flex-col items-center gap-5">${marca('w-16 h-16')}<div class="h-1 w-24 overflow-hidden rounded bg-white/20"><div class="h-full w-1/2 animate-pulse bg-white"></div></div></div></div>`;
+
+function vSetup() {
+  return `<div class="min-h-screen bg-papel safe-t"><div class="mx-auto max-w-xl px-5 py-10">
+    <div class="flex items-center gap-3">${marca('w-14 h-14')}<div><div class="text-[22px] font-extrabold text-vinho-700">${esc(NOME_APP)}</div><div class="text-[15px] text-grafite/60">${esc(NOME_HOSPITAL)}</div></div></div>
+    <h1 class="mt-8 text-[26px] font-extrabold leading-tight">Falta conectar o banco de dados</h1>
+    <p class="mt-2 text-[16px] leading-relaxed text-grafite/75">Enquanto isso, você pode testar tudo no modo demonstração. Para a equipe usar com dados reais e compartilhados, siga estes passos:</p>
+    <ol class="mt-5 space-y-3">
+      <li class="card p-4"><b>1. Crie um projeto grátis</b> em supabase.com.</li>
+      <li class="card p-4"><b>2. Instale o banco:</b> no Supabase, abra <i>SQL Editor</i>, cole o script e clique em <i>Run</i>.
+        <div class="mt-3 flex flex-wrap gap-2"><button class="btn btn-p" onclick="copiarSQL()">${ic('note')} Copiar script</button><button class="btn btn-s" onclick="baixarTexto('instalar_banco.sql', sqlInstalacao())">${ic('download')} Baixar script</button></div></li>
+      <li class="card p-4"><b>3. Cole suas chaves</b> no topo deste arquivo, nas linhas <code class="rounded bg-vinho-50 px-1">SUPABASE_URL</code> e <code class="rounded bg-vinho-50 px-1">SUPABASE_KEY</code>.</li>
+      <li class="card p-4"><b>4. Publique</b> o arquivo no Netlify ou GitHub Pages e mande o link para a equipe.</li>
+    </ol>
+    <button class="btn btn-p mt-6 w-full py-3.5 text-[16px]" onclick="abrirDemo()">${ic('eye')} Ver demonstração</button>
+  </div></div>`;
+}
+
+function vLogin() {
+  const demo = S.modo === 'demo';
+  const entrada = demo
+    ? `<div class="mt-8 space-y-2"><p class="text-[15px] text-white/80">Modo demonstração: escolha com quem entrar.</p>
+        ${DEMO.map(d => `<button onclick="entrarDemo('${d.id}')" class="flex w-full items-center gap-3 rounded-2xl bg-white/10 p-3 text-left ring-1 ring-white/15 hover:bg-white/15">${avatar(DB.perfis.find(p => p.id === d.id))}<div><div class="font-bold">${esc(d.rot)}</div><div class="text-[13px] text-white/70">${esc(d.sub)}</div></div></button>`).join('')}
+        <button onclick="sairDemo()" class="w-full py-3 text-[14px] font-semibold text-white/70">Voltar para a configuração</button></div>`
+    : `<form class="mt-8 space-y-3" onsubmit="event.preventDefault(); fazerLogin()">
+        <input id="l-email" type="email" inputmode="email" autocomplete="username" placeholder="E-mail" class="w-full rounded-2xl bg-white/10 px-4 py-3.5 text-[16px] text-white placeholder-white/50 outline-none ring-1 ring-white/15 focus:ring-2 focus:ring-white/60">
+        <div class="relative"><input id="l-senha" type="password" autocomplete="current-password" placeholder="Senha" class="w-full rounded-2xl bg-white/10 px-4 py-3.5 pr-12 text-[16px] text-white placeholder-white/50 outline-none ring-1 ring-white/15 focus:ring-2 focus:ring-white/60">
+          <button type="button" onclick="const i=$('#l-senha'); i.type=i.type==='password'?'text':'password'" class="absolute right-1 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center text-white/70" aria-label="Mostrar senha">${ic('eye')}</button></div>
+        <button id="l-btn" class="btn w-full bg-white py-3.5 text-[16px] text-vinho-700 hover:bg-vinho-50">${ic('login')} Entrar</button>
+        <button type="button" onclick="esqueciSenha()" class="w-full py-2 text-[14px] font-semibold text-white/80">Esqueceu sua senha?</button>
+      </form>`;
+  return `<div class="relative min-h-screen overflow-hidden bg-gradient-to-b from-vinho-900 via-vinho-800 to-vinho-700 text-white safe-t">
+    <svg class="pulso ${S.animou ? 'pronto' : ''} pointer-events-none absolute inset-x-0 top-56 h-28 w-full opacity-20" viewBox="0 0 400 100" preserveAspectRatio="none"><path d="M0 55 H150 L162 55 L175 18 L192 90 L206 38 L216 55 H400" fill="none" stroke="#fff" stroke-width="1.6"/></svg>
+    <div class="relative mx-auto flex min-h-screen max-w-sm flex-col px-6 pb-10 pt-14">
+      <div class="flex items-center gap-3">${marca('w-14 h-14')}<div><div class="text-[21px] font-extrabold leading-tight">${esc(NOME_APP)}</div><div class="text-[15px] text-white/70">${esc(NOME_HOSPITAL)}</div></div></div>
+      <h1 class="mt-24 text-[30px] font-extrabold leading-tight">Entre para ver sua escala.</h1>
+      ${entrada}
+      <p class="mt-auto pt-10 text-center text-[13px] leading-relaxed text-white/55">O acesso é criado pela coordenação do hospital.<br>Recebeu e-mail e senha? É só entrar.</p>
+    </div></div>`;
+}
+
+function vPrimeiro() {
+  const e = S.eu;
+  return `<div class="min-h-screen bg-papel">${topo('Primeiro acesso')}${main(`
+    <h2 class="text-[22px] font-extrabold">Complete seu cadastro</h2>
+    <p class="mt-1 text-[15px] text-grafite/70">Seus colegas e a coordenação vão ver esses dados na escala. Leva um minuto.</p>
+    <div class="card mt-4 p-4">
+      <label class="lbl !mt-0">Nome completo</label><input id="p-nome" class="inp" value="${esc(e.nome || '')}" autocomplete="name">
+      <div class="grid grid-cols-3 gap-3"><div class="col-span-2"><label class="lbl">CRM</label><input id="p-crm" class="inp" inputmode="numeric" value="${esc(e.crm || '')}"></div>
+      <div><label class="lbl">UF</label><select id="p-uf" class="inp">${UFS.map(u => `<option ${u === (e.uf_crm || 'RJ') ? 'selected' : ''}>${u}</option>`).join('')}</select></div></div>
+      <label class="lbl">Especialidade</label><input id="p-esp" class="inp" value="${esc(e.especialidade || '')}" placeholder="Ex.: Clínica Médica">
+      <label class="lbl">Celular (WhatsApp)</label><input id="p-tel" class="inp" inputmode="tel" value="${esc(e.telefone || '')}" placeholder="(22) 99999-9999">
+      ${S.modo === 'demo' ? '' : `<label class="lbl">Crie sua senha (recomendado)</label><input id="p-senha" type="password" class="inp" autocomplete="new-password" placeholder="Mínimo 6 caracteres">`}
+      <label class="mt-4 flex items-start gap-3 text-[14px] text-grafite/75"><input id="p-lgpd" type="checkbox" class="mt-1 h-5 w-5 accent-vinho-600">Autorizo o uso do meu nome, CRM e contato para a gestão da escala deste hospital (LGPD).</label>
+    </div>
+    <button class="btn btn-p mt-4 w-full py-3.5 text-[16px]" onclick="salvarPrimeiro()">Salvar e começar</button>
+    <button class="btn btn-g mt-2 w-full" onclick="sair()">Sair</button>`)}</div>`;
+}
+
+function vHome() {
+  const agora = new Date(); const hoje = inicioDia(agora); const ontem = addDias(hoje, -1); const amanha = addDias(hoje, 1);
+  const meus = S.plantoes.filter(ehMeu).sort(porInicio);
+  const deOntem = meus.filter(p => D(p.inicio) >= ontem && D(p.inicio) < hoje);
+  const deHoje = meus.filter(p => D(p.inicio) >= hoje && D(p.inicio) < amanha);
+  const proximos = meus.filter(p => D(p.inicio) >= amanha).slice(0, 6);
+  const andamento = meus.filter(p => D(p.inicio) <= agora && D(p.fim) > agora);
+  const doMes = meus.filter(p => D(p.inicio).getMonth() === agora.getMonth() && D(p.inicio).getFullYear() === agora.getFullYear());
+  const hMes = doMes.reduce((a, p) => a + horas(p), 0);
+  const h = agora.getHours(); const [saud, icone] = h < 12 ? ['Bom dia!', 'sun'] : h < 18 ? ['Boa tarde!', 'sun'] : ['Boa noite!', 'moon'];
+  const receb = contarRecebidas(); const aprov = souCoord() ? S.sols.filter(s => s.status === 'aguardando_coordenador' && !expirada(s)).length : 0;
+  const disp = contarAnuncios(); const vagos = souCoord() ? S.plantoes.filter(p => !p.medico_id && p.status !== 'anunciado' && D(p.inicio) > agora).length : 0;
+  const anim = S.animou ? 'pronto' : ''; S.animou = true;
+  const aviso = (cor, icn, txt, onclick) => `<button onclick="${onclick}" class="card flex w-full items-center gap-3 p-3.5 text-left hover:ring-vinho-200"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl ${cor}">${ic(icn)}</div><div class="flex-1 text-[15px] font-semibold">${txt}</div>${ic('chevR', 'w-4 h-4 text-grafite/30')}</button>`;
+  const avisos = [
+    receb ? aviso('bg-magenta/10 text-magenta', 'inbox', `${plural(receb, 'pedido espera', 'pedidos esperam')} sua resposta`, "S.pendTab='recebidas';irRaiz('pendencias')") : '',
+    aprov ? aviso('bg-ameixa/10 text-ameixa', 'check', `${plural(aprov, 'pedido aguarda', 'pedidos aguardam')} sua aprovação`, "S.pendTab='aprovar';irRaiz('pendencias')") : '',
+    disp ? aviso('bg-amber-50 text-amber-600', 'megaphone', `${plural(disp, 'plantão anunciado que você pode assumir', 'plantões anunciados que você pode assumir')}`, "S.anTab='disponiveis';irRaiz('anuncios')") : '',
+    vagos ? aviso('bg-zinc-100 text-zinc-600', 'alert', `${plural(vagos, 'plantão vago', 'plantões vagos')} na escala`, "S.admTab='plantoes';ir('admin')") : '',
+  ].join('');
+  const lista = (arr, vazioTxt) => arr.length ? `<div class="space-y-2">${arr.map(p => cardPlantao(p)).join('')}</div>` : `<p class="card px-4 py-3 text-[14px] text-grafite/55">${vazioTxt}</p>`;
+  return `<section class="relative overflow-hidden bg-gradient-to-br from-vinho-800 via-vinho-600 to-magenta text-white safe-t">
+      <svg class="pulso ${anim} pointer-events-none absolute inset-x-0 bottom-3 h-24 w-full opacity-25" viewBox="0 0 400 100" preserveAspectRatio="none"><path d="M0 62 H130 L145 62 L160 22 L180 92 L196 42 L207 62 H400" fill="none" stroke="#fff" stroke-width="1.8"/></svg>
+      <div class="relative mx-auto max-w-3xl px-5 pb-9 pt-4">
+        <div class="flex items-center justify-between"><span class="text-[14px] font-semibold text-white/80">${esc(S.hospital?.nome || NOME_HOSPITAL)}</span>
+          <button onclick="irRaiz('pendencias')" class="relative grid h-10 w-10 place-items-center rounded-full hover:bg-white/10" aria-label="Pendências">${ic('inbox', 'w-6 h-6')}${contarPendencias() ? '<span class="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-amber-300"></span>' : ''}</button></div>
+        <div class="mt-4 flex items-start justify-between gap-4">
+          <div class="min-w-0"><p class="flex items-center gap-2 text-[34px] font-extrabold leading-none tracking-tight">${saud} ${ic(icone, 'w-7 h-7 text-amber-200')}</p>
+            <p class="mt-2 truncate text-[18px] font-bold text-amber-100">${esc(S.eu.nome || nomeCurto(S.eu))}</p>
+            <p class="mt-0.5 text-[15px] text-white/85">${andamento.length ? `Você tem <b>${plural(andamento.length, 'plantão', 'plantões')} em andamento</b>.` : 'Nenhum plantão em andamento agora.'}</p>
+            <p class="mt-3 text-[14px] text-white/75">Em ${MESES[agora.getMonth()].toLowerCase()}: ${plural(doMes.length, 'plantão', 'plantões')}, ${fmtH(hMes)}</p></div>
+          ${avatar(S.eu, 'w-16 h-16 text-[22px] ring-4 ring-white/25')}
+        </div></div></section>
+    ${main(`${avisos ? `<div class="space-y-2">${avisos}</div>` : ''}
+      ${secao(`Plantões de ontem, ${dm(ontem)}`, lista(deOntem, 'Nenhum plantão ontem.'))}
+      ${secao(`Plantões de hoje, ${dm(hoje)}`, lista(deHoje, 'Nenhum plantão hoje.'))}
+      ${secao('Próximos plantões', lista(proximos, 'Nenhum plantão marcado para os próximos dias.'))}
+      <button class="btn btn-s mt-4 w-full" onclick="S.agendaModo='minha';irRaiz('agenda')">${ic('calendar')} Ver minha agenda completa</button>`)}`;
+}
+
+function vAgenda() {
+  const ano = S.mes.getFullYear(), mes = S.mes.getMonth();
+  const filtro = p => (!S.filtroSetor || p.setor_id === S.filtroSetor) && (S.agendaModo === 'geral' || ehMeu(p));
+  const doMes = S.plantoes.filter(p => { const d = D(p.inicio); return d.getFullYear() === ano && d.getMonth() === mes && filtro(p); });
+  const porDia = {}; doMes.forEach(p => (porDia[ymd(D(p.inicio))] = porDia[ymd(D(p.inicio))] || []).push(p));
+  let cels = ''; for (let i = 0; i < new Date(ano, mes, 1).getDay(); i++) cels += '<div></div>';
+  const nDias = new Date(ano, mes + 1, 0).getDate(); const hojeK = ymd(new Date());
+  for (let d = 1; d <= nDias; d++) {
+    const k = `${ano}-${pad(mes + 1)}-${pad(d)}`; const ps = porDia[k] || []; const sel = S.dia === k;
+    const dots = [ps.some(ehMeu) && 'bg-magenta', ps.some(p => p.medico_id && !ehMeu(p)) && 'bg-vinho-600', ps.some(p => p.status === 'anunciado') && 'bg-ambar', ps.some(p => !p.medico_id) && 'bg-zinc-400'].filter(Boolean);
+    cels += `<button onclick="selDia('${k}')" class="flex h-12 flex-col items-center justify-center rounded-xl ${sel ? 'bg-vinho-600 text-white' : k === hojeK ? 'font-extrabold text-vinho-600 ring-1 ring-vinho-200' : 'hover:bg-vinho-50'}">
+      <span class="tnum text-[15px] font-semibold">${d}</span><span class="mt-0.5 flex h-1.5 gap-0.5">${dots.map(c => `<i class="h-1.5 w-1.5 rounded-full ${sel ? 'bg-white' : c}"></i>`).join('')}</span></button>`;
+  }
+  const doDia = (porDia[S.dia] || []).sort(porInicio);
+  const grupos = {}; doDia.forEach(p => (grupos[p.setor_id] = grupos[p.setor_id] || []).push(p));
+  const dSel = new Date(S.dia + 'T12:00');
+  const listaDia = doDia.length ? Object.entries(grupos).map(([sid, ps]) => `<h3 class="mb-2 mt-4 flex items-center gap-2 text-[14px] font-bold text-vinho-700"><span class="h-2.5 w-2.5 rounded-full" style="background:${esc(setor(sid)?.cor || '#971232')}"></span>${esc(setor(sid)?.nome || 'Setor')}</h3><div class="space-y-2">${ps.map(itemEscala).join('')}</div>`).join('')
+    : vazio(S.agendaModo === 'minha' ? 'Você não tem plantão neste dia.' : 'Nenhum plantão neste dia.', souCoord() ? `<button class="btn btn-s" onclick="abrirPlantaoForm()">${ic('plus')} Criar plantão</button>` : '');
+  const meusMes = S.agendaModo === 'minha' ? S.plantoes.filter(p => ehMeu(p) && D(p.inicio).getMonth() === mes && D(p.inicio).getFullYear() === ano).sort(porInicio) : [];
+  const setoresChips = [['', 'Todos os setores'], ...S.setores.filter(s => s.ativo).map(s => [s.id, s.nome])];
+  return topo(`<div class="flex items-center justify-center gap-1"><button onclick="mudarMes(-1)" class="grid h-10 w-10 place-items-center rounded-full hover:bg-white/10" aria-label="Mês anterior">${ic('chevL')}</button><span class="w-40 text-center">${MESES[mes]} ${ano}</span><button onclick="mudarMes(1)" class="grid h-10 w-10 place-items-center rounded-full hover:bg-white/10" aria-label="Próximo mês">${ic('chevR')}</button></div>`,
+    { direita: souCoord() ? `<button onclick="abrirPlantaoForm()" class="grid h-11 w-11 place-items-center rounded-full hover:bg-white/10" aria-label="Novo plantão">${ic('plus', 'w-6 h-6')}</button>` : '<div class="w-11"></div>' })
+  + main(`
+    <div class="mb-3 grid grid-cols-2 rounded-xl bg-white p-1 ring-1 ring-linha">
+      ${[['geral', 'Agenda geral'], ['minha', 'Minha agenda']].map(([v, t]) => `<button onclick="S.agendaModo='${v}';render()" class="rounded-lg py-2 text-[14px] font-bold ${S.agendaModo === v ? 'bg-vinho-600 text-white' : 'text-grafite/60'}">${t}</button>`).join('')}</div>
+    ${S.setores.length > 1 ? `<div class="sem-barra -mx-4 mb-3 flex gap-2 overflow-x-auto px-4">${setoresChips.map(([id, n]) => `<button onclick="S.filtroSetor='${id}';render()" class="chip ${S.filtroSetor === id ? 'chip-on' : ''}">${esc(n)}</button>`).join('')}</div>` : ''}
+    <div class="card p-3">
+      <div class="mb-1 grid grid-cols-7 text-center text-[12px] font-bold text-grafite/45">${DIAS.map(d => `<div>${d}</div>`).join('')}</div>
+      <div class="grid grid-cols-7 gap-1">${cels}</div>
+      <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-linha pt-2 text-[12px] text-grafite/60">
+        <span class="flex items-center gap-1"><i class="h-2 w-2 rounded-full bg-magenta"></i>Seu</span><span class="flex items-center gap-1"><i class="h-2 w-2 rounded-full bg-vinho-600"></i>Colegas</span>
+        <span class="flex items-center gap-1"><i class="h-2 w-2 rounded-full bg-ambar"></i>Anunciado</span><span class="flex items-center gap-1"><i class="h-2 w-2 rounded-full bg-zinc-400"></i>Vago</span></div>
+    </div>
+    <h2 class="mt-5 text-[17px] font-extrabold">${dataLonga(dSel)}</h2>
+    ${listaDia}
+    ${S.agendaModo === 'minha' ? secao(`Todos os seus plantões em ${MESES[mes].toLowerCase()}`, meusMes.length ? `<div class="space-y-2">${meusMes.map(p => cardPlantao(p)).join('')}</div>` : vazio('Nenhum plantão seu neste mês.')) : ''}`);
+}
+function itemEscala(p) {
+  const med = perfil(p.medico_id); const anun = p.status === 'anunciado'; const meu = ehMeu(p);
+  const nome = anun ? (med ? `Anúncio de ${esc(nomeCurto(med))}` : 'Vaga anunciada') : med ? esc(nomeCurto(med)) + (meu ? ' (você)' : '') : 'Plantão vago';
+  return `<button onclick="tocarPlantao('${p.id}')" class="card flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:ring-vinho-200 ${meu ? '!ring-2 !ring-magenta/40' : ''}">
+    ${anun ? `<div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ambar text-white">${ic('megaphone')}</div>` : avatar(med)}
+    <div class="tnum w-12 shrink-0 text-[13px] leading-tight ${anun ? 'text-amber-600' : 'text-grafite/70'}"><div>${hm(D(p.inicio))}</div><div>${hm(D(p.fim))}</div><div class="mt-1 h-0.5 rounded" style="background:${corTipo(p.tipo)}"></div></div>
+    <div class="min-w-0 flex-1"><div class="truncate text-[15px] font-semibold ${anun ? 'text-amber-700' : !med ? 'text-grafite/50' : ''}">${nome}</div><div class="text-[13px] font-bold text-grafite/60">${fmtH(horas(p))} <span class="font-medium">${esc(p.tipo || '')}</span></div></div>
+    ${ic('chevR', 'w-4 h-4 text-grafite/30')}</button>`;
+}
+
+function vPlantao() {
+  const p = plantao(S.params.id);
+  if (!p) return topo('Plantão', { voltar: true }) + main(vazio('Este plantão não está mais na escala. Ele pode ter sido excluído ou dividido.'));
+  const st = setor(p.setor_id); const med = perfil(p.medico_id); const meu = ehMeu(p); const coord = souCoord();
+  const agora = new Date(); const futuro = D(p.inicio) > agora; const sol = solAtiva(p.id);
+  const linha = (icn, rot, val, extra = '') => `<div class="card flex items-start gap-3 p-4"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-vinho-50 text-vinho-600">${icn}</div><div class="min-w-0 flex-1"><div class="text-[13px] text-grafite/55">${rot}</div><div class="text-[16px] font-semibold">${val}</div>${extra}</div></div>`;
+  const statusTxt = { designado: 'Plantão designado', anunciado: 'Plantão anunciado', vago: 'Plantão vago' }[p.status];
+  const acaoBtn = (icn, t, sub, fn, cor = 'text-vinho-600 bg-vinho-50') => `<button onclick="${fn}" class="card flex w-full items-center gap-3 p-3.5 text-left hover:ring-vinho-200"><div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl ${cor}">${ic(icn)}</div><div class="flex-1"><div class="text-[15px] font-bold">${t}</div><div class="text-[13px] text-grafite/60">${sub}</div></div>${ic('chevR', 'w-4 h-4 text-grafite/30')}</button>`;
+  let acoes = '';
+  if (sol) {
+    const outro = perfil(sol.tipo === 'anuncio' ? null : (sol.solicitante_id === S.eu.id ? sol.destinatario_id : sol.solicitante_id));
+    acoes += `<div class="card p-4"><div class="flex items-center justify-between gap-2"><b class="text-[15px]">${ROTULO[sol.tipo]}</b>${statusTag(sol.status)}</div>
+      <p class="mt-1 text-[14px] text-grafite/70">${sol.tipo === 'anuncio' ? `${plural(S.cands.filter(c => c.solicitacao_id === sol.id && c.status === 'ativa').length, 'candidato', 'candidatos')} até agora.` : `Com ${esc(nomeCurto(outro))}.`}</p>
+      <div class="mt-3 flex flex-wrap gap-2">${sol.tipo === 'anuncio' ? `<button class="btn btn-s" onclick="S.anTab='meus';irRaiz('anuncios')">Ver anúncio</button>` : `<button class="btn btn-s" onclick="S.pendTab='${sol.solicitante_id === S.eu.id ? 'enviados' : 'recebidas'}';irRaiz('pendencias')">Ver pedido</button>`}
+      ${(sol.solicitante_id === S.eu.id || coord) ? `<button class="btn btn-g" onclick="cancelarPedido('${sol.id}')">Cancelar pedido</button>` : ''}</div></div>`;
+  } else if (futuro && (meu || (coord && !p.medico_id))) {
+    acoes += acaoBtn('megaphone', meu ? 'Anunciar plantão' : 'Anunciar vaga', 'Colegas habilitados no setor podem se candidatar', `anunciar('${p.id}')`, 'bg-amber-50 text-amber-600');
+    if (meu) acoes += acaoBtn('swap', 'Passar ou trocar', 'Escolha um colega e proponha', `ir('trocar',{id:'${p.id}'})`);
+  }
+  if (!sol && (meu || coord) && (futuro || coord) && (st?.permite_divisao || coord) && horas(p) >= 2) acoes += acaoBtn('scissors', 'Dividir plantão', 'Transforma em 2 plantões menores', `ir('dividir',{id:'${p.id}'})`, 'bg-ameixa/10 text-ameixa');
+  if (coord) acoes += `<div class="grid grid-cols-2 gap-2"><button class="btn btn-s" onclick="abrirPlantaoForm('${p.id}')">${ic('edit')} Editar</button><button class="btn btn-s !text-red-700 !ring-red-200" onclick="excluirPlantao('${p.id}')">${ic('trash')} Excluir</button></div>`;
+  let pres = '';
+  if (meu) {
+    if (p.checkin_em) pres = `<div class="text-[13px] text-grafite/60">Entrada ${hm(D(p.checkin_em))}${p.checkout_em ? `, saída ${hm(D(p.checkout_em))}` : ''}</div>`;
+    if (!p.checkin_em && agora >= D(p.inicio) - 2 * 36e5 && agora < D(p.fim)) pres += `<button class="btn btn-p" onclick="presenca('${p.id}','entrada')">${ic('clock')} Registrar entrada</button>`;
+    else if (p.checkin_em && !p.checkout_em) pres += `<button class="btn btn-s !ring-red-200 !text-red-700" onclick="presenca('${p.id}','saida')">${ic('clock')} Encerrar</button>`;
+  }
+  return topo('Plantão', { voltar: true }) + main(`<div class="space-y-2">
+    ${linha(ic('building'), esc(st?.nome || 'Setor'), esc(S.hospital?.nome || NOME_HOSPITAL), `<div class="mt-0.5 text-[14px] font-semibold ${p.status === 'anunciado' ? 'text-amber-600' : p.status === 'vago' ? 'text-grafite/50' : 'text-vinho-600'}">${statusTxt}</div>`)}
+    ${linha(avatar(med, 'w-10 h-10 text-[14px]'), 'Médico', med ? esc(med.nome || nomeCurto(med)) + (meu ? ' (você)' : '') : 'Ninguém escalado', med ? `<div class="text-[13px] text-grafite/60">${med.crm ? `CRM ${esc(med.crm)}/${esc(med.uf_crm || '')}` : ''}</div>${!meu ? `<button class="mt-1 text-[14px] font-bold text-vinho-600" onclick="contato('${med.id}')">Ver contato</button>` : ''}` : '')}
+    ${p.valor != null ? linha(ic('money'), 'Valor', dinheiro(p.valor)) : ''}
+    ${linha(`<span class="h-5 w-5 rounded-md" style="background:${corTipo(p.tipo)}"></span>`, 'Tipo', esc(TIPOS[p.tipo]?.nome || p.tipo || '—'))}
+    ${p.observacao ? linha(ic('note'), 'Observação', esc(p.observacao)) : ''}
+    ${p.origem_id ? `<p class="px-1 text-[13px] text-grafite/55">Este plantão nasceu da divisão de outro plantão.</p>` : ''}
+  </div>
+  <div class="card mt-3 flex flex-wrap items-center justify-between gap-3 p-4">
+    <div><div class="flex items-center gap-2 text-[15px] font-bold">${ic('calendar', 'w-4 h-4 text-vinho-600')}${dataLonga(D(p.inicio))}</div><div class="tnum mt-1 flex items-center gap-2 text-[15px]">${ic('clock', 'w-4 h-4 text-vinho-600')}${faixa(p)} <span class="text-grafite/55">(${fmtH(horas(p))})</span></div></div>
+    <div class="flex flex-col items-end gap-1">${pres}</div></div>
+  ${acoes ? secao('O que você pode fazer', `<div class="space-y-2">${acoes}</div>`) : ''}`);
+}
+
+function blocoPessoa(p, pessoa, rotulo) {
+  return `<div class="card p-4"><div class="flex items-center gap-3">${avatar(pessoa)}<div class="min-w-0"><div class="text-[12px] text-grafite/55">${rotulo}</div><div class="truncate text-[16px] font-bold text-vinho-700">${esc(pessoa ? (pessoa.nome || nomeCurto(pessoa)) : '')}</div>${pessoa?.crm ? `<div class="text-[13px] text-grafite/55">${esc(pessoa.crm)}/${esc(pessoa.uf_crm || '')}</div>` : ''}</div></div>
+    ${p ? `<div class="mt-3 border-t border-linha pt-3">${miniPlantao(p)}</div>` : ''}</div>`;
+}
+function vTrocar() {
+  const p = plantao(S.params.id);
+  if (!p) return topo('Passar ou trocar', { voltar: true }) + main(vazio('Plantão não encontrado.'));
+  if (!S.troca || S.troca.plantao !== p.id) S.troca = { plantao: p.id, colega: null, contra: null, msg: '' };
+  const T = S.troca; const col = perfil(T.colega);
+  let bloco;
+  if (!col) bloco = `<button onclick="escolherColega()" class="btn btn-p w-full py-3.5 text-[16px]">${ic('search')} Buscar colega</button>`;
+  else {
+    const dele = S.plantoes.filter(x => x.medico_id === col.id && D(x.inicio) > new Date() && !solAtiva(x.id) && apto(S.eu, x.setor_id)).sort(porInicio).slice(0, 20);
+    const opcao = (v, titulo, sub) => `<button onclick="S.troca.contra=${v ? `'${v}'` : 'null'};render()" class="flex w-full items-start gap-3 rounded-xl p-3 text-left ring-1 ${T.contra === v ? 'bg-vinho-50 ring-vinho-400' : 'ring-linha hover:bg-vinho-50/40'}">
+      <span class="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ring-2 ${T.contra === v ? 'bg-vinho-600 ring-vinho-600 text-white' : 'ring-grafite/25'}">${T.contra === v ? ic('check', 'w-3 h-3') : ''}</span><span><span class="block text-[15px] font-semibold">${titulo}</span>${sub}</span></button>`;
+    bloco = `<div class="card p-4"><div class="flex items-center gap-3">${avatar(col)}<div class="min-w-0 flex-1"><div class="text-[12px] text-grafite/55">Colega</div><div class="truncate text-[16px] font-bold text-vinho-700">${esc(col.nome || nomeCurto(col))}</div></div><button class="btn btn-s !px-3 !py-1.5 text-[13px]" onclick="escolherColega()">Alterar</button></div>
+      <p class="mb-2 mt-4 text-[14px] font-bold text-grafite/70">O que você quer propor?</p>
+      <div class="space-y-2">${opcao(null, `Só passar meu plantão para ${esc(nomeCurto(col))}`, '<span class="text-[13px] text-grafite/60">Você não recebe nenhum plantão em troca.</span>')}
+      ${dele.map(x => opcao(x.id, `Trocar pelo plantão de ${dataCurta(D(x.inicio))}`, `<span class="text-[13px] text-grafite/60">${faixa(x)}, ${fmtH(horas(x))}, ${esc(setor(x.setor_id)?.nome || '')}</span>`)).join('')}</div>
+      ${!dele.length ? '<p class="mt-2 text-[13px] text-grafite/55">Este colega não tem plantões futuros livres para troca no período carregado.</p>' : ''}
+      <label class="lbl">Mensagem (opcional)</label><textarea class="inp" rows="2" oninput="S.troca.msg=this.value" placeholder="Ex.: tenho um compromisso nesse dia">${esc(T.msg)}</textarea></div>`;
+  }
+  return topo('Passar ou trocar', { voltar: true }) + main(`
+    ${blocoPessoa(p, S.eu, 'Seu plantão')}
+    <div class="my-2 flex justify-center"><span class="grid h-9 w-9 place-items-center rounded-full bg-ambar text-white">${ic('swap', 'w-4 h-4')}</span></div>
+    ${bloco}
+    ${col ? `<div class="mt-4 grid grid-cols-2 gap-2"><button class="btn btn-s py-3" onclick="history.back()">${ic('x')} Não</button><button class="btn btn-p py-3" onclick="enviarTroca()">${ic('check')} ${T.contra ? 'Propor troca' : 'Propor passagem'}</button></div>
+      <p class="mt-2 text-center text-[13px] text-grafite/55">${esc(nomeCurto(col))} precisa aceitar.${setor(p.setor_id)?.exige_aprovacao ? ' Depois, a coordenação aprova.' : ''} Você pode cancelar enquanto não houver resposta.</p>` : ''}`);
+}
+
+function vDividir() {
+  const p = plantao(S.params.id);
+  if (!p) return topo('Dividir plantão', { voltar: true }) + main(vazio('Plantão não encontrado.'));
+  const total = horas(p);
+  if (!S.divisao || S.divisao.id !== p.id) S.divisao = { id: p.id, h: Math.floor(total / 2) };
+  const [a, b] = textoDivisao(p, S.divisao.h);
+  return topo('Dividir plantão', { voltar: true }) + main(`
+    ${blocoPessoa(p, perfil(p.medico_id), 'Plantão que será dividido')}
+    <div class="card mt-3 p-4">
+      <p class="text-[15px] text-grafite/75">Arraste para escolher onde o plantão será cortado. Surgem 2 plantões independentes: depois você pode anunciar, passar ou trocar só uma parte.</p>
+      <input type="range" min="1" max="${Math.floor(total) - 1}" step="1" value="${S.divisao.h}" oninput="moverDivisao(this.value)" class="mt-5 w-full" aria-label="Ponto de divisão">
+      <div class="mt-4 grid grid-cols-2 gap-2">
+        <div class="rounded-xl bg-vinho-50 p-3"><div class="text-[12px] font-bold text-vinho-700">Parte 1</div><div id="div-a" class="tnum mt-1 text-[15px] font-semibold">${a}</div></div>
+        <div class="rounded-xl bg-ameixa/10 p-3"><div class="text-[12px] font-bold text-ameixa">Parte 2</div><div id="div-b" class="tnum mt-1 text-[15px] font-semibold">${b}</div></div>
+      </div></div>
+    <button class="btn btn-p mt-4 w-full py-3.5 text-[16px]" onclick="confirmarDivisao()">${ic('scissors')} Dividir em 2 plantões</button>`);
+}
+function textoDivisao(p, h) {
+  const ponto = new Date(D(p.inicio).getTime() + h * 36e5); const total = horas(p);
+  const f = d => (ymd(d) !== ymd(D(p.inicio)) ? `${DIAS[d.getDay()]} ` : '') + hm(d);
+  return [`${hm(D(p.inicio))} às ${f(ponto)} (${fmtH(h)})`, `${f(ponto)} às ${f(D(p.fim))} (${fmtH(total - h)})`];
+}
+
+function vAnuncios() {
+  const disp = anunciosDisponiveis();
+  const outros = S.sols.filter(s => s.tipo === 'anuncio' && s.status === 'pendente' && s.solicitante_id !== S.eu.id && !expirada(s) && !disp.includes(s));
+  const meus = S.sols.filter(s => s.tipo === 'anuncio' && ativa(s) && !expirada(s) && (s.solicitante_id === S.eu.id || souCoord()));
+  const tab = S.anTab;
+  let corpo;
+  if (tab === 'disponiveis') corpo = disp.length || outros.length ? `<div class="space-y-3">${disp.map(s => cardAnuncio(s, false)).join('')}${outros.map(s => cardAnuncio(s, false)).join('')}</div>`
+    : vazio('Nenhum plantão anunciado agora. Quando um colega anunciar, ele aparece aqui.');
+  else corpo = meus.length ? `<div class="space-y-3">${meus.map(s => cardAnuncio(s, true)).join('')}</div>`
+    : vazio('Você não tem anúncios abertos. Para anunciar, abra um plantão seu na Agenda e toque em Anunciar plantão.', `<button class="btn btn-s" onclick="S.agendaModo='minha';irRaiz('agenda')">${ic('calendar')} Abrir minha agenda</button>`);
+  return topo('Anúncios') + main(abas([['disponiveis', 'Disponíveis', disp.length], ['meus', souCoord() ? 'Gerenciar anúncios' : 'Meus anúncios', meus.length]], tab, 'mudarAnTab') + corpo);
+}
+function cardAnuncio(s, gerenciar) {
+  const p = plantao(s.plantao_id); if (!p) return '';
+  const anunc = perfil(s.solicitante_id); const dono = perfil(p.medico_id);
+  const cs = S.cands.filter(c => c.solicitacao_id === s.id && ['ativa', 'escolhida'].includes(c.status));
+  const minha = cs.find(c => c.medico_id === S.eu.id && c.status === 'ativa'); const podeIr = apto(S.eu, p.setor_id);
+  let rodape = '';
+  if (gerenciar) {
+    if (s.status === 'aguardando_coordenador') rodape = `<p class="text-[14px]">Escolhido: <b>${esc(nomeCurto(perfil(s.destinatario_id)))}</b>. ${statusTag(s.status)}</p>`;
+    else rodape = cs.length ? `<p class="mb-2 text-[13px] font-bold text-grafite/60">Candidatos</p><div class="space-y-2">${cs.map(c => { const m = perfil(c.medico_id); return `<div class="flex items-center gap-3">${avatar(m, 'w-9 h-9 text-[13px]')}<div class="min-w-0 flex-1"><div class="truncate text-[15px] font-semibold">${esc(nomeCurto(m))}</div><div class="text-[12px] text-grafite/55">${relativo(c.criado_em)}</div></div><button class="btn btn-p !px-3 !py-1.5 text-[14px]" onclick="escolher('${s.id}','${c.medico_id}')">Escolher</button></div>`; }).join('')}</div>`
+      : '<p class="text-[14px] text-grafite/60">Ainda sem candidatos. Você será avisado quando alguém se candidatar.</p>';
+    rodape += `<button class="btn btn-g mt-3 w-full" onclick="cancelarPedido('${s.id}')">Cancelar anúncio</button>`;
+  } else if (minha) rodape = `<div class="flex items-center justify-between gap-2"><span class="text-[14px] font-semibold text-emerald-700">Você se candidatou. Aguarde a escolha.</span><button class="btn btn-g !px-3 !py-1.5 text-[14px]" onclick="candidatar('${s.id}',false)">Desistir</button></div>`;
+  else rodape = podeIr ? `<button class="btn btn-p w-full" onclick="candidatar('${s.id}',true)">${ic('check')} Quero assumir</button>` : '<p class="text-[14px] text-grafite/55">Você não está habilitado neste setor.</p>';
+  return `<div class="card overflow-hidden"><div class="flex items-center gap-3 border-b border-linha p-4">
+      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ambar text-white">${ic('megaphone')}</div>
+      <div class="min-w-0 flex-1"><div class="truncate text-[15px] font-bold">${dono ? `Anúncio de ${esc(nomeCurto(dono))}` : `Vaga anunciada por ${esc(nomeCurto(anunc))}`}</div><div class="text-[13px] text-grafite/55">${relativo(s.criado_em)} · ${plural(cs.length, 'candidato', 'candidatos')}</div></div></div>
+    <div class="p-4">${miniPlantao(p)}${s.mensagem ? `<p class="mt-2 rounded-xl bg-papel p-3 text-[14px] text-grafite/75">“${esc(s.mensagem)}”</p>` : ''}<div class="mt-3">${rodape}</div></div></div>`;
+}
+
+function vPendencias() {
+  const receb = S.sols.filter(s => s.tipo !== 'anuncio' && s.destinatario_id === S.eu.id && s.status === 'pendente');
+  const env = S.sols.filter(s => s.solicitante_id === S.eu.id);
+  const minhasCands = S.cands.filter(c => c.medico_id === S.eu.id && c.status !== 'cancelada');
+  const aprov = souCoord() ? S.sols.filter(s => s.status === 'aguardando_coordenador') : [];
+  const itens = [['recebidas', 'Para mim', receb.filter(s => !expirada(s)).length], ['enviados', 'Enviados'], ...(souCoord() ? [['aprovar', 'Aprovar', aprov.filter(s => !expirada(s)).length]] : [])];
+  const tab = itens.some(i => i[0] === S.pendTab) ? S.pendTab : 'recebidas';
+  let corpo;
+  if (tab === 'recebidas') corpo = receb.length ? receb.map(s => cardSol(s, 'recebida')).join('') : vazio('Nenhum pedido esperando sua resposta.');
+  else if (tab === 'aprovar') corpo = aprov.length ? aprov.map(s => cardSol(s, 'aprovar')).join('') : vazio('Nada para aprovar agora.');
+  else corpo = (env.length ? env.map(s => cardSol(s, 'enviada')).join('') : vazio('Você ainda não fez pedidos.'))
+    + (minhasCands.length ? secao('Suas candidaturas', `<div class="space-y-2">${minhasCands.map(c => { const s = S.sols.find(x => x.id === c.solicitacao_id); const p = s && plantao(s.plantao_id);
+      const txt = { ativa: ['Aguardando a escolha', 'text-amber-700'], escolhida: ['Você foi escolhido', 'text-emerald-700'], nao_escolhida: ['Outro colega foi escolhido', 'text-grafite/55'] }[c.status] || ['', ''];
+      return `<div class="card p-3.5">${miniPlantao(p)}<div class="mt-1 text-[13px] font-semibold ${txt[1]}">${txt[0]}</div></div>`; }).join('')}</div>`) : '');
+  return topo('Pendências') + main(abas(itens, tab, 'mudarPendTab') + `<div class="space-y-3">${corpo}</div>`);
+}
+function cardSol(s, modo) {
+  const p = plantao(s.plantao_id); const pc = s.plantao_contra_id ? plantao(s.plantao_contra_id) : null;
+  const de = perfil(s.solicitante_id); const para = perfil(s.destinatario_id); const exp = expirada(s);
+  let corpo = '';
+  if (s.tipo === 'troca') corpo = `<div class="space-y-2"><div><div class="text-[12px] font-bold text-grafite/55">${esc(nomeCurto(de))} entrega</div>${miniPlantao(p)}</div><div><div class="text-[12px] font-bold text-grafite/55">${esc(nomeCurto(para))} entrega</div>${miniPlantao(pc)}</div></div>`;
+  else if (s.tipo === 'passagem') corpo = `<div class="text-[12px] font-bold text-grafite/55">${esc(nomeCurto(de))} passa para ${esc(nomeCurto(para))}</div>${miniPlantao(p)}`;
+  else corpo = `<div class="text-[12px] font-bold text-grafite/55">${!para ? 'Anúncio' : s.status === 'concluida' ? `Assumido por ${esc(nomeCurto(para))}` : `Candidato escolhido: ${esc(nomeCurto(para))}`}</div>${miniPlantao(p)}`;
+  let acoes = '';
+  if (!exp && modo === 'recebida' && s.status === 'pendente') acoes = `<div class="mt-3 grid grid-cols-2 gap-2"><button class="btn btn-s" onclick="responder('${s.id}',false)">${ic('x')} Recusar</button><button class="btn btn-p" onclick="responder('${s.id}',true)">${ic('check')} Aceitar</button></div>`;
+  if (!exp && modo === 'aprovar') acoes = `<div class="mt-3 grid grid-cols-2 gap-2"><button class="btn btn-s" onclick="aprovar('${s.id}',false)">${ic('x')} Recusar</button><button class="btn btn-p" onclick="aprovar('${s.id}',true)">${ic('check')} Aprovar</button></div>`;
+  if (!exp && modo === 'enviada' && ativa(s)) acoes = `<button class="btn btn-g mt-3 w-full" onclick="cancelarPedido('${s.id}')">Cancelar pedido</button>`;
+  return `<div class="card p-4"><div class="flex items-start gap-3">${avatar(modo === 'enviada' ? (para || de) : de, 'w-10 h-10 text-[14px]')}
+      <div class="min-w-0 flex-1"><div class="flex items-center justify-between gap-2"><b class="text-[15px]">${ROTULO[s.tipo]}</b><span class="shrink-0 text-[12px] text-grafite/50">${relativo(s.criado_em)}</span></div>
+      <div class="mt-1">${exp ? '<span class="tag bg-zinc-100 text-zinc-600">Expirado: o plantão já começou</span>' : statusTag(s.status)}</div></div></div>
+    <div class="mt-3 border-t border-linha pt-3">${corpo}</div>
+    ${s.mensagem ? `<p class="mt-2 rounded-xl bg-papel p-3 text-[14px] text-grafite/75">“${esc(s.mensagem)}”</p>` : ''}
+    ${s.motivo ? `<p class="mt-2 text-[13px] text-grafite/60">Motivo: ${esc(s.motivo)}</p>` : ''}${acoes}</div>`;
+}
+
+function vMais() {
+  const e = S.eu;
+  const item = (icn, t, fn, sub = '') => `<button onclick="${fn}" class="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-vinho-50/50"><span class="text-vinho-600">${ic(icn)}</span><span class="flex-1"><span class="block text-[15px] font-semibold">${t}</span>${sub ? `<span class="block text-[13px] text-grafite/55">${sub}</span>` : ''}</span>${ic('chevR', 'w-4 h-4 text-grafite/30')}</button>`;
+  return topo('Mais') + main(`
+    <div class="card flex items-center gap-4 p-4">${avatar(e, 'w-14 h-14 text-[18px]')}<div class="min-w-0"><div class="truncate text-[17px] font-bold">${esc(e.nome || nomeCurto(e))}</div>
+      <div class="text-[13px] text-grafite/60">${souCoord() ? 'Coordenação' : 'Profissional'}${e.crm ? `, CRM ${esc(e.crm)}/${esc(e.uf_crm || '')}` : ''}</div></div></div>
+    <div class="card mt-3 divide-y divide-linha overflow-hidden">
+      ${item('calendar', 'Minha agenda', "S.agendaModo='minha';irRaiz('agenda')")}
+      ${item('chart', 'Relatórios e fechamento', "ir('relatorios')", 'Trocas do mês e horas por médico, com Excel')}
+      ${souCoord() ? item('sliders', 'Administração', "ir('admin')", 'Plantões, médicos, setores e importação') : ''}
+      ${item('user', 'Meu perfil', 'abrirMeuPerfil()')}
+    </div>
+    <div class="card mt-3 divide-y divide-linha overflow-hidden">
+      ${S.modo === 'demo' ? item('users', 'Entrar com outro usuário', 'sair()', 'Modo demonstração') : ''}
+      ${item('logout', 'Sair', 'sair()')}
+    </div>
+    <p class="mt-6 text-center text-[12px] text-grafite/45">${esc(NOME_APP)} · ${esc(S.hospital?.nome || NOME_HOSPITAL)}${S.modo === 'demo' ? ' · demonstração' : ''}</p>`);
+}
+
+// ---------- relatórios ----------
+function vRelatorios() {
+  const R = S.rel; const m = R.mes;
+  const filtros = `<div class="card p-3"><div class="flex items-center justify-between"><button onclick="mudarMesRel(-1)" class="grid h-10 w-10 place-items-center rounded-full hover:bg-vinho-50" aria-label="Mês anterior">${ic('chevL')}</button>
+      <b class="text-[16px]">${MESES[m.getMonth()]} ${m.getFullYear()}</b><button onclick="mudarMesRel(1)" class="grid h-10 w-10 place-items-center rounded-full hover:bg-vinho-50" aria-label="Próximo mês">${ic('chevR')}</button></div>
+    ${S.setores.length > 1 ? `<select class="inp mt-2" onchange="S.rel.setor=this.value;render()"><option value="">Todos os setores</option>${S.setores.map(s => `<option value="${s.id}" ${R.setor === s.id ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}</select>` : ''}</div>`;
+  if (R.carregando || !R.dados) return topo('Relatórios', { voltar: true }) + main(filtros + `<div class="mt-6 text-center text-[15px] text-grafite/55">Carregando…</div>`);
+  const { movs, fech, cont } = calcularRelatorio();
+  const tile = (n, t) => `<div class="rounded-2xl bg-white p-3 ring-1 ring-linha"><div class="tnum text-[26px] font-extrabold leading-none text-vinho-700">${n}</div><div class="mt-1 text-[13px] text-grafite/60">${t}</div></div>`;
+  const tipos = [['', 'Todas'], ['troca', 'Trocas'], ['passagem', 'Passagens'], ['anuncio', 'Anúncios'], ['divisao', 'Divisões'], ['ajuste', 'Ajustes']];
+  const lista = movs.filter(h => !R.tipo || h.tipo === R.tipo);
+  const temValor = fech.some(f => f.v > 0);
+  return topo('Relatórios', { voltar: true }) + main(filtros + `
+    <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">${tile(cont.troca, 'trocas')}${tile(cont.passagem, 'passagens')}${tile(cont.anuncio, 'anúncios assumidos')}${tile(cont.divisao, 'divisões')}</div>
+    <button class="btn btn-p mt-3 w-full py-3" onclick="baixarRelatorio()">${ic('download')} Baixar Excel do mês (.xlsx)</button>
+    ${secao('Fechamento por médico', fech.length ? `<div class="card overflow-x-auto"><table class="w-full min-w-[520px] text-left text-[14px]"><thead class="bg-papel text-[12px] text-grafite/60"><tr><th class="px-3 py-2">Médico</th><th class="px-3 py-2 text-right">Plantões</th><th class="px-3 py-2 text-right">Horas</th><th class="px-3 py-2 text-right">Cedidos</th><th class="px-3 py-2 text-right">Recebidos</th>${temValor ? '<th class="px-3 py-2 text-right">Valor</th>' : ''}</tr></thead>
+      <tbody class="tnum divide-y divide-linha">${fech.map(f => `<tr><td class="px-3 py-2 font-semibold">${esc(f.nome)}</td><td class="px-3 py-2 text-right">${f.n}</td><td class="px-3 py-2 text-right">${fmtH(f.h)}</td><td class="px-3 py-2 text-right">${f.ced}</td><td class="px-3 py-2 text-right">${f.rec}</td>${temValor ? `<td class="px-3 py-2 text-right">${dinheiro(f.v)}</td>` : ''}</tr>`).join('')}</tbody></table></div>` : vazio('Nenhum plantão neste mês.'))}
+    ${secao('Movimentações dos plantões do mês', abas(tipos.map(([v, t]) => [v || 'todas', t]), R.tipo || 'todas', 'mudarTipoRel') + (lista.length ? `<div class="space-y-2">${lista.map(h => `<div class="card p-3.5">
+        <div class="flex items-center justify-between gap-2"><span class="tag bg-vinho-50 text-vinho-700">${TIPO_MOV[h.tipo] || h.tipo}</span><span class="text-[12px] text-grafite/50">registrado em ${dm(D(h.criado_em))}</span></div>
+        <div class="mt-2 text-[15px] font-semibold">${h.tipo === 'divisao' || h.tipo === 'ajuste' ? esc(nomeCurto(perfil(h.para_medico_id || h.de_medico_id))) : `${esc(nomeCurto(perfil(h.de_medico_id)))} → ${esc(nomeCurto(perfil(h.para_medico_id)))}`}</div>
+        <div class="text-[14px] text-grafite/65">${h.inicio ? `${dataCurta(D(h.inicio))}, ${faixa(h)} (${fmtH(horas(h))})` : ''} ${esc(setor(h.setor_id)?.nome || '')}</div>
+        ${h.detalhes ? `<div class="mt-1 text-[13px] text-grafite/55">${esc(h.detalhes)}</div>` : ''}</div>`).join('')}</div>` : vazio('Nenhuma movimentação com esse filtro.')))}
+    ${!souCoord() ? '<p class="mt-4 text-[13px] text-grafite/55">Você vê apenas os seus números. A coordenação vê o hospital todo.</p>' : ''}`);
+}
+function calcularRelatorio() {
+  const R = S.rel; const { hist, pls } = R.dados;
+  const movs = hist.filter(h => !R.setor || h.setor_id === R.setor);
+  const cont = { troca: new Set(movs.filter(h => h.tipo === 'troca').map(h => h.solicitacao_id || h.id)).size, passagem: movs.filter(h => h.tipo === 'passagem').length, anuncio: movs.filter(h => h.tipo === 'anuncio').length, divisao: movs.filter(h => h.tipo === 'divisao').length };
+  const mapa = {}; const reg = id => (mapa[id || 'vago'] = mapa[id || 'vago'] || { id: id || 'vago', n: 0, h: 0, v: 0, ced: 0, rec: 0 });
+  pls.filter(p => !R.setor || p.setor_id === R.setor).forEach(p => { const o = reg(p.medico_id); o.n++; o.h += horas(p); o.v += Number(p.valor || 0); });
+  movs.filter(h => ['troca', 'passagem', 'anuncio'].includes(h.tipo)).forEach(h => { if (h.de_medico_id) reg(h.de_medico_id).ced++; if (h.para_medico_id) reg(h.para_medico_id).rec++; });
+  let fech = Object.values(mapa).map(o => ({ ...o, p: perfil(o.id), nome: o.id === 'vago' ? 'Plantões vagos' : nomeCurto(perfil(o.id)) }));
+  if (!souCoord()) fech = fech.filter(f => f.id === S.eu.id);
+  fech.sort((a, b) => (a.id === 'vago') - (b.id === 'vago') || b.h - a.h);
+  return { movs, fech, cont };
+}
+async function carregarRelatorio() {
+  S.rel.carregando = true; if (S.view === 'relatorios') render();
+  try { const de = S.rel.mes, ate = addMeses(S.rel.mes, 1); const [hist, pls] = await Promise.all([api.historico(de, ate), api.plantoesPeriodo(de, ate)]); S.rel.dados = { hist, pls }; }
+  catch (e) { toast(traduz(e).message, 'erro'); S.rel.dados = { hist: [], pls: [] }; }
+  S.rel.carregando = false; if (S.view === 'relatorios') render();
+}
+function mudarMesRel(n) { S.rel.mes = addMeses(S.rel.mes, n); carregarRelatorio(); }
+function mudarTipoRel(v) { S.rel.tipo = v === 'todas' ? '' : v; render(); }
+function baixarRelatorio() {
+  if (!window.XLSX) return toast('A biblioteca do Excel não carregou. Verifique a internet.', 'erro');
+  const { movs, fech } = calcularRelatorio(); const m = S.rel.mes; const nomeMes = `${m.getFullYear()}-${pad(m.getMonth() + 1)}`;
+  const pessoa = id => perfil(id);
+  const f1 = fech.map(f => ({ 'Médico': f.p?.nome || f.nome, 'Nome na escala': f.p?.nome_na_escala || '', 'CRM': f.p?.crm || '', 'UF': f.p?.uf_crm || '', 'Plantões': f.n, 'Horas': Math.round(f.h * 10) / 10, 'Valor (R$)': f.v || null, 'Cedidos': f.ced, 'Recebidos': f.rec }));
+  const f2 = movs.map(h => ({ 'Data do plantão': h.inicio ? ymd(D(h.inicio)).split('-').reverse().join('/') : '', 'Início': h.inicio ? hm(D(h.inicio)) : '', 'Fim': h.fim ? hm(D(h.fim)) : '', 'Horas': h.inicio ? horas(h) : null, 'Setor': setor(h.setor_id)?.nome || '', 'Tipo': TIPO_MOV[h.tipo] || h.tipo, 'De': nomeCurto(pessoa(h.de_medico_id)), 'CRM de': pessoa(h.de_medico_id)?.crm || '', 'Para': nomeCurto(pessoa(h.para_medico_id)), 'CRM para': pessoa(h.para_medico_id)?.crm || '', 'Registrado em': `${dm(D(h.criado_em))}/${D(h.criado_em).getFullYear()} ${hm(D(h.criado_em))}`, 'Registrado por': nomeCurto(pessoa(h.feito_por)), 'Detalhes': h.detalhes || '' }));
+  const pls = S.rel.dados.pls.filter(p => (!S.rel.setor || p.setor_id === S.rel.setor) && (souCoord() || ehMeu(p)));
+  const f3 = pls.map(p => ({ 'Data': ymd(D(p.inicio)).split('-').reverse().join('/'), 'Início': hm(D(p.inicio)), 'Fim': hm(D(p.fim)), 'Horas': horas(p), 'Setor': setor(p.setor_id)?.nome || '', 'Tipo': p.tipo, 'Médico': p.medico_id ? (pessoa(p.medico_id)?.nome || nomeCurto(pessoa(p.medico_id))) : 'VAGO', 'Nome na escala': pessoa(p.medico_id)?.nome_na_escala || '', 'CRM': pessoa(p.medico_id)?.crm || '', 'Valor (R$)': p.valor, 'Situação': p.status, 'Entrada registrada': p.checkin_em ? hm(D(p.checkin_em)) : '', 'Saída registrada': p.checkout_em ? hm(D(p.checkout_em)) : '' }));
+  const wb = XLSX.utils.book_new();
+  [[f1, 'Fechamento'], [f2, 'Movimentacoes'], [f3, 'Plantoes']].forEach(([linhas, nome]) => {
+    const ws = linhas.length ? XLSX.utils.json_to_sheet(linhas) : XLSX.utils.aoa_to_sheet([['Sem dados neste mês']]);
+    if (linhas.length) ws['!cols'] = Object.keys(linhas[0]).map(k => ({ wch: Math.max(k.length, ...linhas.map(l => String(l[k] ?? '').length)) + 2 }));
+    XLSX.utils.book_append_sheet(wb, ws, nome);
+  });
+  XLSX.writeFile(wb, `Fechamento_Plantoes_${nomeMes}.xlsx`);
+  toast('Planilha baixada.');
+}
+
+// ---------- administração (coordenação) ----------
+function vAdmin() {
+  if (!souCoord()) return topo('Administração', { voltar: true }) + main(vazio('Área exclusiva da coordenação.'));
+  const tab = S.admTab; let corpo = '';
+  if (tab === 'plantoes') {
+    const vagos = S.plantoes.filter(p => !p.medico_id && D(p.inicio) > new Date()).sort(porInicio);
+    corpo = `<button class="btn btn-p w-full py-3" onclick="abrirPlantaoForm()">${ic('plus')} Novo plantão</button>
+      <p class="mt-2 text-[13px] text-grafite/55">Para editar ou excluir, toque no plantão na Agenda.</p>
+      ${secao('Plantões vagos', vagos.length ? `<div class="space-y-2">${vagos.map(p => cardPlantao(p)).join('')}</div>` : vazio('Nenhum plantão vago. A escala está completa.'))}`;
+  } else if (tab === 'medicos') {
+    const lista = [...S.perfis].sort(porNome);
+    corpo = `<div class="card bg-vinho-50/60 p-4 text-[14px] leading-relaxed text-grafite/80"><b>Para cadastrar um médico:</b> no Supabase, abra <i>Authentication › Users › Add user › Create new user</i>, informe o e-mail e uma senha provisória e marque <i>Auto Confirm User</i>. Ele aparece aqui na hora. Depois toque nele para definir o nome na escala e os setores.</div>
+      <div class="mt-3 space-y-2">${lista.map(m => `<button onclick="abrirMedicoForm('${m.id}')" class="card flex w-full items-center gap-3 p-3 text-left hover:ring-vinho-200">${avatar(m)}
+        <div class="min-w-0 flex-1"><div class="truncate text-[15px] font-bold">${esc(m.nome || m.email)}</div><div class="truncate text-[13px] text-grafite/60">${m.nome_na_escala ? `Na escala: ${esc(m.nome_na_escala)}` : '<span class="text-amber-700">Sem nome na escala</span>'}${m.setores.length ? `, ${m.setores.map(id => esc(setor(id)?.nome || '')).join(', ')}` : ', sem setor'}</div>
+        <div class="mt-1 flex flex-wrap gap-1">${m.papel === 'coordenador' ? '<span class="tag bg-ameixa/10 text-ameixa">Coordenação</span>' : ''}${!m.cadastro_completo ? '<span class="tag bg-amber-50 text-amber-700">Primeiro acesso pendente</span>' : ''}${!m.ativo ? '<span class="tag bg-zinc-100 text-zinc-600">Inativo</span>' : ''}</div></div>${ic('chevR', 'w-4 h-4 text-grafite/30')}</button>`).join('')}</div>`;
+  } else if (tab === 'setores') {
+    corpo = `<button class="btn btn-p w-full py-3" onclick="abrirSetorForm()">${ic('plus')} Novo setor</button>
+      <div class="mt-3 space-y-2">${S.setores.map(s => `<button onclick="abrirSetorForm('${s.id}')" class="card flex w-full items-center gap-3 p-3.5 text-left hover:ring-vinho-200"><span class="h-4 w-4 shrink-0 rounded-full" style="background:${esc(s.cor)}"></span>
+        <div class="flex-1"><div class="text-[15px] font-bold">${esc(s.nome)}</div><div class="mt-1 flex flex-wrap gap-1">${s.exige_aprovacao ? '<span class="tag bg-ameixa/10 text-ameixa">Trocas com aprovação</span>' : '<span class="tag bg-emerald-50 text-emerald-700">Trocas diretas</span>'}${s.permite_divisao ? '<span class="tag bg-vinho-50 text-vinho-700">Permite dividir</span>' : ''}${!s.ativo ? '<span class="tag bg-zinc-100 text-zinc-600">Inativo</span>' : ''}</div></div>
+        <span class="text-[13px] text-grafite/55">${plural(S.perfis.filter(p => p.setores.includes(s.id)).length, 'médico', 'médicos')}</span></button>`).join('')}</div>`;
+  } else corpo = abaImportar();
+  return topo('Administração', { voltar: true }) + main(abas([['plantoes', 'Plantões'], ['medicos', 'Médicos'], ['setores', 'Setores'], ['importar', 'Importar Excel']], tab, 'mudarAdmTab') + corpo);
+}
+function abaImportar() {
+  const I = S.imp; const setorPadrao = S.impSetor || S.setores[0]?.id || '';
+  let prev = '';
+  if (I) {
+    const ok = I.linhas.filter(l => l.situacao === 'ok' || l.situacao === 'vago');
+    const nomes = [...new Set(I.linhas.filter(l => l.situacao === 'vago' && l.nomeOriginal).map(l => l.nomeOriginal))];
+    prev = `<div class="card mt-3 p-4"><div class="text-[15px] font-bold">${esc(I.nome)}</div>
+      <div class="mt-2 flex flex-wrap gap-1.5">
+        <span class="tag bg-emerald-50 text-emerald-700">${plural(I.linhas.filter(l => l.situacao === 'ok').length, 'pronto', 'prontos')}</span>
+        ${I.linhas.some(l => l.situacao === 'vago') ? `<span class="tag bg-zinc-100 text-zinc-700">${I.linhas.filter(l => l.situacao === 'vago').length} entram como vagos</span>` : ''}
+        ${I.linhas.some(l => l.situacao === 'duplicado') ? `<span class="tag bg-amber-50 text-amber-700">${I.linhas.filter(l => l.situacao === 'duplicado').length} já existiam (ignorados)</span>` : ''}
+        ${I.linhas.some(l => l.situacao === 'erro') ? `<span class="tag bg-red-50 text-red-700">${I.linhas.filter(l => l.situacao === 'erro').length} com erro (ignorados)</span>` : ''}</div>
+      ${nomes.length ? `<p class="mt-2 text-[13px] text-grafite/70">Nomes sem médico correspondente: <b>${nomes.map(esc).join(', ')}</b>. Defina o "nome na escala" desses médicos na aba Médicos e leia o arquivo de novo, ou importe como vagos.</p>` : ''}
+      ${I.novosSetores.length ? `<p class="mt-2 text-[13px] text-grafite/70">Setores novos que serão criados: <b>${I.novosSetores.map(esc).join(', ')}</b>.</p>` : ''}
+      <div class="mt-3 max-h-80 overflow-auto rounded-xl ring-1 ring-linha"><table class="w-full min-w-[480px] text-left text-[13px]"><thead class="sticky top-0 bg-papel text-grafite/60"><tr><th class="px-2 py-1.5">Data</th><th class="px-2 py-1.5">Horário</th><th class="px-2 py-1.5">Setor</th><th class="px-2 py-1.5">Médico</th><th class="px-2 py-1.5">Situação</th></tr></thead>
+      <tbody class="tnum divide-y divide-linha">${I.linhas.slice(0, 80).map(l => `<tr><td class="px-2 py-1.5">${l.inicio ? dataCurta(l.inicio) : '—'}</td><td class="px-2 py-1.5">${l.inicio ? `${hm(l.inicio)}–${hm(l.fim)}` : '—'}</td><td class="px-2 py-1.5">${esc(l.setorNome || '')}</td><td class="px-2 py-1.5">${esc(l.medico ? nomeCurto(l.medico) : (l.nomeOriginal || 'Vago'))}</td>
+        <td class="px-2 py-1.5">${{ ok: '<span class="text-emerald-700">Ok</span>', vago: '<span class="text-zinc-600">Vago</span>', duplicado: '<span class="text-amber-700">Já existe</span>', erro: `<span class="text-red-700">${esc(l.erro)}</span>` }[l.situacao]}</td></tr>`).join('')}</tbody></table></div>
+      ${I.linhas.length > 80 ? `<p class="mt-1 text-[12px] text-grafite/55">Mostrando 80 de ${I.linhas.length} linhas.</p>` : ''}
+      <button class="btn btn-p mt-3 w-full py-3" ${ok.length ? '' : 'disabled'} onclick="confirmarImportacao()">${ic('upload')} Importar ${plural(ok.length, 'plantão', 'plantões')}</button>
+      <button class="btn btn-g mt-1 w-full" onclick="S.imp=null;render()">Descartar</button></div>`;
+  }
+  return `<div class="card p-4"><h3 class="text-[16px] font-bold">Importar a escala do mês</h3>
+    <p class="mt-1 text-[14px] leading-relaxed text-grafite/70">O app lê a aba <b>Importar</b> da planilha (ou a primeira aba, ou um CSV). Colunas: <i>setor, data, inicio, fim ou horas, turno, nome_na_escala, valor, observacao</i>. O nome é ligado ao médico pelo campo "nome na escala". Linhas repetidas (mesmo setor e horário) são ignoradas.</p>
+    <div class="mt-3 flex flex-wrap gap-2"><label class="btn btn-p cursor-pointer">${ic('sheet')} Escolher arquivo<input type="file" accept=".xlsx,.xls,.csv" class="hidden" onchange="lerImportacao(this.files[0]); this.value=''"></label>
+      <button class="btn btn-s" onclick="baixarModelo()">${ic('download')} Baixar modelo</button></div>
+    <label class="lbl">Setor usado quando a linha não informar</label>
+    <select class="inp" onchange="S.impSetor=this.value; if(S.imp) prepararImportacao()">${S.setores.map(s => `<option value="${s.id}" ${s.id === setorPadrao ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}</select></div>${prev}`;
+}
+
+// ---------- janelas (modais) ----------
+function abrirModal(html) {
+  $('#modal').innerHTML = `<div class="fixed inset-0 z-50 flex items-end justify-center bg-black/45 sm:items-center" onclick="if(event.target===this)fecharModal()">
+    <div class="sobe max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-white p-5 pb-8 safe-b sm:max-w-md sm:rounded-3xl" role="dialog" aria-modal="true">${html}</div></div>`;
+  document.body.style.overflow = 'hidden';
+}
+function fecharModal() { $('#modal').innerHTML = ''; document.body.style.overflow = ''; }
+const modalAberto = () => !!$('#modal').innerHTML;
+function confirmar({ titulo, texto = '', ok = 'Confirmar', perigo = false, campo = null }, fn) {
+  S.confirmFn = fn;
+  abrirModal(`<h2 class="text-[19px] font-extrabold">${titulo}</h2>${texto ? `<p class="mt-2 text-[15px] leading-relaxed text-grafite/70">${texto}</p>` : ''}
+    ${campo ? `<textarea id="c-campo" class="inp mt-3" rows="3" placeholder="${esc(campo)}"></textarea>` : ''}
+    <div class="mt-5 grid grid-cols-2 gap-2"><button class="btn btn-s" onclick="fecharModal()">Voltar</button><button class="btn ${perigo ? 'btn-x' : 'btn-p'}" onclick="okConfirmar()">${ok}</button></div>`);
+}
+async function okConfirmar() { const v = $('#c-campo') ? $('#c-campo').value : ''; const fn = S.confirmFn; fecharModal(); if (fn) await fn(v); }
+function contato(id) {
+  const p = perfil(id); if (!p) return;
+  const tel = (p.telefone || '').replace(/\D/g, ''); const intl = tel ? (tel.length <= 11 ? '55' + tel : tel) : '';
+  abrirModal(`<div class="flex flex-col items-center text-center">${avatar(p, 'w-20 h-20 text-[26px]')}<h2 class="mt-3 text-[20px] font-extrabold">${esc(p.nome || nomeCurto(p))}</h2>
+    <p class="text-[14px] text-grafite/60">${p.crm ? `CRM ${esc(p.crm)}/${esc(p.uf_crm || '')}` : ''}${p.especialidade ? `<br>${esc(p.especialidade)}` : ''}</p></div>
+    <div class="mt-5 grid gap-2">${tel ? `<a class="btn btn-s" href="tel:+${intl}">${ic('phone')} Ligar</a><a class="btn btn-s" target="_blank" rel="noopener" href="https://wa.me/${intl}">${ic('message')} WhatsApp</a>` : '<p class="text-center text-[14px] text-grafite/55">Telefone não informado.</p>'}
+    ${p.email && !/@demo\.app$/.test(p.email) ? `<a class="btn btn-s" href="mailto:${esc(p.email)}">${ic('mail')} Enviar e-mail</a>` : ''}<button class="btn btn-g" onclick="fecharModal()">Fechar</button></div>`);
+}
+function esqueciSenha() {
+  abrirModal(`<h2 class="text-[19px] font-extrabold">Esqueceu a senha?</h2><p class="mt-2 text-[15px] leading-relaxed text-grafite/70">Peça à coordenação uma senha provisória. No app, ela vai em <b>Mais › Administração › Médicos</b>, toca no seu nome e usa <b>Definir senha provisória</b>. Depois você troca em Meu perfil.</p><button class="btn btn-p mt-5 w-full" onclick="fecharModal()">Entendi</button>`);
+}
+function abrirMeuPerfil() {
+  const e = S.eu;
+  abrirModal(`<h2 class="text-[19px] font-extrabold">Meu perfil</h2>
+    <label class="lbl">Nome completo</label><input id="m-nome" class="inp" value="${esc(e.nome || '')}">
+    <div class="grid grid-cols-3 gap-3"><div class="col-span-2"><label class="lbl">CRM</label><input id="m-crm" class="inp" value="${esc(e.crm || '')}"></div><div><label class="lbl">UF</label><select id="m-uf" class="inp">${UFS.map(u => `<option ${u === (e.uf_crm || 'RJ') ? 'selected' : ''}>${u}</option>`).join('')}</select></div></div>
+    <label class="lbl">Especialidade</label><input id="m-esp" class="inp" value="${esc(e.especialidade || '')}">
+    <label class="lbl">Celular (WhatsApp)</label><input id="m-tel" class="inp" inputmode="tel" value="${esc(e.telefone || '')}">
+    <p class="mt-3 text-[13px] text-grafite/55">E-mail de acesso: ${esc(e.email || '')}${e.nome_na_escala ? `. Nome na escala: ${esc(e.nome_na_escala)}` : ''}</p>
+    <button class="btn btn-p mt-4 w-full" onclick="salvarMeuPerfil()">Salvar perfil</button>
+    ${S.modo === 'demo' ? '' : `<div class="mt-5 border-t border-linha pt-4"><label class="lbl !mt-0">Nova senha</label><input id="m-senha" type="password" class="inp" autocomplete="new-password" placeholder="Mínimo 6 caracteres"><button class="btn btn-s mt-2 w-full" onclick="trocarMinhaSenha()">${ic('key')} Trocar senha</button></div>`}
+    <button class="btn btn-g mt-2 w-full" onclick="fecharModal()">Fechar</button>`);
+}
+function abrirPlantaoForm(id) {
+  const p = id ? plantao(id) : null;
+  const di = p ? D(p.inicio) : new Date(`${S.dia}T07:00`);
+  const setorSel = p ? p.setor_id : (S.filtroSetor || S.setores.find(s => s.ativo)?.id);
+  if (!S.setores.length) return toast('Cadastre um setor primeiro (Administração › Setores).', 'erro');
+  abrirModal(`<h2 class="text-[19px] font-extrabold">${p ? 'Editar plantão' : 'Novo plantão'}</h2>
+    <label class="lbl">Setor</label><select id="f-setor" class="inp">${S.setores.filter(s => s.ativo || s.id === setorSel).map(s => `<option value="${s.id}" ${s.id === setorSel ? 'selected' : ''}>${esc(s.nome)}</option>`).join('')}</select>
+    <label class="lbl">Médico</label><select id="f-medico" class="inp"><option value="">Vago (sem médico)</option>${S.perfis.filter(m => m.ativo || m.id === p?.medico_id).sort(porNome).map(m => `<option value="${m.id}" ${m.id === p?.medico_id ? 'selected' : ''}>${esc(nomeCurto(m))}${m.nome && m.nome_na_escala ? ` (${esc(m.nome)})` : ''}</option>`).join('')}</select>
+    <label class="lbl">Tipo</label><select id="f-tipo" class="inp" onchange="const t=TIPOS[this.value]; if(t){ $('#f-hora').value=t.ini; $('#f-horas').value=t.h; }">${Object.entries(TIPOS).map(([k, t]) => `<option value="${k}" ${k === (p?.tipo || 'P24') ? 'selected' : ''}>${k}: ${t.nome}</option>`).join('')}${p && !TIPOS[p.tipo] ? `<option selected>${esc(p.tipo)}</option>` : ''}<option value="OUTRO">Outro</option></select>
+    <div class="grid grid-cols-2 gap-3"><div><label class="lbl">Data</label><input id="f-data" type="date" class="inp" value="${ymd(di)}"></div><div><label class="lbl">Início</label><input id="f-hora" type="time" class="inp" value="${hm(di)}"></div></div>
+    <div class="grid grid-cols-2 gap-3"><div><label class="lbl">Duração (horas)</label><input id="f-horas" type="number" min="1" max="48" step="0.5" class="inp" value="${p ? horas(p) : 24}"></div><div><label class="lbl">Valor R$ (opcional)</label><input id="f-valor" type="number" min="0" step="0.01" class="inp" value="${p?.valor ?? ''}"></div></div>
+    <label class="lbl">Observação</label><input id="f-obs" class="inp" value="${esc(p?.observacao || '')}">
+    <div class="mt-5 grid grid-cols-2 gap-2"><button class="btn btn-s" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarPlantaoForm(${p ? `'${p.id}'` : ''})">Salvar plantão</button></div>`);
+}
+function abrirMedicoForm(id) {
+  const m = perfil(id); if (!m) return;
+  abrirModal(`<div class="flex items-center gap-3">${avatar(m, 'w-12 h-12 text-[16px]')}<div class="min-w-0"><h2 class="truncate text-[18px] font-extrabold">${esc(m.nome || m.email)}</h2><p class="truncate text-[13px] text-grafite/60">${esc(m.email || '')}${m.crm ? `, CRM ${esc(m.crm)}/${esc(m.uf_crm || '')}` : ''}</p></div></div>
+    <label class="lbl">Nome na escala (igual ao da planilha)</label><input id="md-escala" class="inp" value="${esc(m.nome_na_escala || '')}" placeholder="Ex.: Maria Isabel">
+    <label class="lbl">Setores em que atende</label><div class="grid gap-2">${S.setores.map(s => `<label class="flex items-center gap-3 rounded-xl p-2.5 ring-1 ring-linha"><input type="checkbox" name="md-set" value="${s.id}" ${m.setores.includes(s.id) ? 'checked' : ''} class="h-5 w-5 accent-vinho-600">${esc(s.nome)}</label>`).join('')}</div>
+    <label class="lbl">Papel</label><select id="md-papel" class="inp"><option value="medico" ${m.papel === 'medico' ? 'selected' : ''}>Médico</option><option value="coordenador" ${m.papel === 'coordenador' ? 'selected' : ''}>Coordenação</option></select>
+    <label class="mt-3 flex items-center gap-3 text-[15px]"><input id="md-ativo" type="checkbox" ${m.ativo ? 'checked' : ''} class="h-5 w-5 accent-vinho-600">Acesso ativo</label>
+    <button class="btn btn-p mt-5 w-full" onclick="salvarMedico('${m.id}')">Salvar</button>
+    ${m.id !== S.eu.id ? `<button class="btn btn-s mt-2 w-full" onclick="definirSenha('${m.id}')">${ic('key')} Definir senha provisória</button>` : ''}
+    <button class="btn btn-g mt-2 w-full" onclick="fecharModal()">Fechar</button>`);
+}
+function abrirSetorForm(id) {
+  const s = id ? setor(id) : { nome: '', cor: '#971232', exige_aprovacao: false, permite_divisao: true, ativo: true };
+  const chk = (idc, v, t, sub) => `<label class="mt-3 flex items-start gap-3"><input id="${idc}" type="checkbox" ${v ? 'checked' : ''} class="mt-1 h-5 w-5 accent-vinho-600"><span><span class="block text-[15px] font-semibold">${t}</span><span class="text-[13px] text-grafite/60">${sub}</span></span></label>`;
+  abrirModal(`<h2 class="text-[19px] font-extrabold">${id ? 'Editar setor' : 'Novo setor'}</h2>
+    <label class="lbl">Nome</label><input id="s-nome" class="inp" value="${esc(s.nome)}" placeholder="Ex.: UTI Adulto">
+    <label class="lbl">Cor na agenda</label><input id="s-cor" type="color" class="h-12 w-full cursor-pointer rounded-xl border border-linha bg-white p-1" value="${esc(s.cor)}">
+    ${chk('s-aprov', s.exige_aprovacao, 'Trocas precisam da aprovação da coordenação', 'Sem isso, a troca vale assim que o colega aceita.')}
+    ${chk('s-div', s.permite_divisao, 'Permitir dividir plantões', 'O médico pode fracionar um plantão longo.')}
+    ${chk('s-ativo', s.ativo, 'Setor ativo', 'Setores inativos somem das listas.')}
+    <div class="mt-5 grid grid-cols-2 gap-2"><button class="btn btn-s" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" onclick="salvarSetor(${id ? `'${id}'` : ''})">Salvar setor</button></div>`);
+}
+function escolherColega() {
+  const p = plantao(S.params.id);
+  abrirModal(`<h2 class="text-[19px] font-extrabold">Escolha o colega</h2><p class="mt-1 text-[14px] text-grafite/60">Só aparecem colegas habilitados em ${esc(setor(p.setor_id)?.nome || 'este setor')}.</p>
+    <div class="relative mt-3"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-grafite/40">${ic('search')}</span><input class="inp !pl-10" placeholder="Buscar pelo nome" oninput="$('#lista-colegas').innerHTML=listaColegas(this.value)"></div>
+    <div id="lista-colegas" class="mt-3 space-y-2">${listaColegas('')}</div>`);
+}
+function listaColegas(busca) {
+  const p = plantao(S.params.id);
+  const cols = S.perfis.filter(m => m.ativo && m.id !== S.eu.id && apto(m, p.setor_id) && norm(`${m.nome} ${m.nome_na_escala}`).includes(norm(busca))).sort(porNome);
+  if (!cols.length) return '<p class="py-4 text-center text-[14px] text-grafite/55">Nenhum colega encontrado.</p>';
+  return cols.map(m => { const ocupado = S.plantoes.some(x => x.medico_id === m.id && D(x.inicio) < D(p.fim) && D(x.fim) > D(p.inicio));
+    return `<button onclick="S.troca.colega='${m.id}';S.troca.contra=null;fecharModal();render()" class="flex w-full items-center gap-3 rounded-xl p-2.5 text-left ring-1 ring-linha hover:bg-vinho-50">${avatar(m)}<div class="min-w-0 flex-1"><div class="truncate text-[15px] font-semibold">${esc(m.nome || nomeCurto(m))}</div><div class="text-[13px] ${ocupado ? 'text-amber-700' : 'text-grafite/55'}">${ocupado ? 'Já tem plantão nesse horário (só dá para trocar)' : (m.especialidade ? esc(m.especialidade) : 'Livre nesse horário')}</div></div></button>`; }).join('');
+}
+
+// =====================================================================
+//  AÇÕES
+// =====================================================================
+function carga(on) { $('#carga').style.opacity = on ? '1' : '0'; }
+function toast(msg, tipo = 'ok') {
+  const el = document.createElement('div');
+  el.className = `sobe pointer-events-auto max-w-md rounded-2xl px-4 py-3 text-[15px] font-semibold shadow-lg ${tipo === 'erro' ? 'bg-red-700 text-white' : 'bg-grafite text-white'}`;
+  el.setAttribute('role', 'status'); el.textContent = msg; $('#toast').appendChild(el);
+  setTimeout(() => el.remove(), tipo === 'erro' ? 6500 : 3800);
+}
+async function executar(fn, msgOk) {
+  if (S.ocupado) return FALHA;
+  S.ocupado = true; carga(true);
+  try { const r = await fn(); if (msgOk) toast(msgOk); await recarregar(); return r; }
+  catch (e) { toast(traduz(e).message, 'erro'); return FALHA; }
+  finally { S.ocupado = false; carga(false); }
+}
+function janela() {
+  const hoje = inicioMes(new Date()); const a = S.mes < hoje ? S.mes : hoje; const b = S.mes > hoje ? S.mes : hoje;
+  return [addMeses(a, -1), addMeses(b, 3)];
+}
+async function carregarDados() {
+  const [de, ate] = janela();
+  const d = await api.carregar(de, ate);
+  Object.assign(S, d); S.janela = [de, ate];
+  S.eu = S.perfis.find(p => p.id === S.eu.id) || S.eu;
+}
+async function recarregar() { await carregarDados(); const y = window.scrollY; render(); window.scrollTo(0, y); if (S.view === 'relatorios') carregarRelatorio(); }
+let tRecarga = null;
+function agendarRecarga() {
+  clearTimeout(tRecarga);
+  tRecarga = setTimeout(async () => {
+    if (!S.eu || ['login', 'primeiro', 'setup', 'carregando'].includes(S.view)) return;
+    const antes = contarRecebidas();
+    try { await carregarDados(); } catch (e) { return; }
+    const y = window.scrollY; render(); window.scrollTo(0, y);
+    if (S.view === 'relatorios') carregarRelatorio();
+    if (contarRecebidas() > antes) toast('Você recebeu um novo pedido. Veja em Pendências.');
+  }, 700);
+}
+
+function anunciar(id) {
+  confirmar({ titulo: 'Anunciar este plantão?', texto: 'Colegas habilitados no setor poderão se candidatar. O plantão continua seu até você escolher quem assume.', ok: 'Anunciar', campo: 'Mensagem para os colegas (opcional)' },
+    v => executar(() => api.rpc('criar_solicitacao', { p_tipo: 'anuncio', p_plantao: id, p_mensagem: v }), 'Plantão anunciado.'));
+}
+async function enviarTroca() {
+  const T = S.troca; const col = perfil(T.colega);
+  const r = await executar(() => api.rpc('criar_solicitacao', { p_tipo: T.contra ? 'troca' : 'passagem', p_plantao: T.plantao, p_destinatario: T.colega, p_plantao_contra: T.contra, p_mensagem: T.msg }), `Proposta enviada para ${nomeCurto(col)}.`);
+  if (r !== FALHA) { S.troca = null; history.back(); }
+}
+function cancelarPedido(id) { confirmar({ titulo: 'Cancelar este pedido?', ok: 'Cancelar pedido', perigo: true }, () => executar(() => api.rpc('cancelar_solicitacao', { p_solicitacao: id }), 'Pedido cancelado.')); }
+async function responder(id, aceitar) {
+  if (!aceitar) return confirmar({ titulo: 'Recusar este pedido?', ok: 'Recusar', perigo: true, campo: 'Motivo (opcional)' },
+    v => executar(() => api.rpc('responder_solicitacao', { p_solicitacao: id, p_aceitar: false, p_motivo: v }), 'Pedido recusado.'));
+  const r = await executar(() => api.rpc('responder_solicitacao', { p_solicitacao: id, p_aceitar: true }));
+  if (r !== FALHA) toast(r === 'aguardando_coordenador' ? 'Aceito. Agora falta a aprovação da coordenação.' : 'Pronto! A escala já foi atualizada.');
+}
+async function aprovar(id, ok) {
+  if (!ok) return confirmar({ titulo: 'Recusar este pedido?', ok: 'Recusar', perigo: true, campo: 'Motivo (aparece para os médicos)' },
+    v => executar(() => api.rpc('aprovar_solicitacao', { p_solicitacao: id, p_aprovar: false, p_motivo: v }), 'Pedido recusado.'));
+  await executar(() => api.rpc('aprovar_solicitacao', { p_solicitacao: id, p_aprovar: true }), 'Aprovado. A escala foi atualizada.');
+}
+function candidatar(id, entrar) { executar(() => api.rpc('candidatar', { p_solicitacao: id, p_entrar: entrar }), entrar ? 'Candidatura enviada. Aguarde a escolha.' : 'Candidatura retirada.'); }
+function escolher(sid, mid) {
+  confirmar({ titulo: `Passar o plantão para ${esc(nomeCurto(perfil(mid)))}?`, texto: 'Os outros candidatos serão avisados de que não foram escolhidos.', ok: 'Escolher' }, async () => {
+    const r = await executar(() => api.rpc('escolher_candidato', { p_solicitacao: sid, p_medico: mid }));
+    if (r !== FALHA) toast(r === 'aguardando_coordenador' ? 'Candidato escolhido. Falta a aprovação da coordenação.' : 'Pronto! O plantão foi passado.');
+  });
+}
+function presenca(id, acao) { executar(() => api.rpc('registrar_presenca', { p_plantao: id, p_acao: acao }), acao === 'entrada' ? 'Entrada registrada. Bom plantão!' : 'Saída registrada.'); }
+function moverDivisao(v) {
+  S.divisao.h = Number(v); const [a, b] = textoDivisao(plantao(S.divisao.id), S.divisao.h);
+  $('#div-a').textContent = a; $('#div-b').textContent = b;
+}
+async function confirmarDivisao() {
+  const p = plantao(S.divisao.id); const ponto = new Date(D(p.inicio).getTime() + S.divisao.h * 36e5);
+  const novo = await executar(() => api.rpc('dividir_plantao', { p_plantao: p.id, p_ponto: ponto.toISOString() }), 'Plantão dividido. Esta é a segunda parte: agora você pode anunciar ou passar.');
+  if (novo !== FALHA) { S.divisao = null; substituir('plantao', { id: novo }); }
+}
+async function salvarPrimeiro() {
+  const v = id => ($(id)?.value || '').trim();
+  if (!v('#p-nome') || !v('#p-crm')) return toast('Preencha nome completo e CRM.', 'erro');
+  if (!$('#p-lgpd').checked) return toast('Para continuar, marque a autorização de uso dos dados.', 'erro');
+  const senha = $('#p-senha')?.value || '';
+  if (senha && senha.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres.', 'erro');
+  carga(true);
+  try {
+    await api.rpc('atualizar_meu_perfil', { p_nome: v('#p-nome'), p_crm: v('#p-crm'), p_uf: v('#p-uf'), p_especialidade: v('#p-esp'), p_telefone: v('#p-tel') });
+    if (senha) await api.trocarSenha(senha);
+    await entrar({ id: S.eu.id }); toast('Cadastro concluído. Bem-vindo!');
+  } catch (e) { toast(traduz(e).message, 'erro'); } finally { carga(false); }
+}
+async function salvarMeuPerfil() {
+  const v = id => ($(id)?.value || '').trim();
+  const r = await executar(() => api.rpc('atualizar_meu_perfil', { p_nome: v('#m-nome'), p_crm: v('#m-crm'), p_uf: v('#m-uf'), p_especialidade: v('#m-esp'), p_telefone: v('#m-tel') }), 'Perfil salvo.');
+  if (r !== FALHA) fecharModal();
+}
+async function trocarMinhaSenha() {
+  const s = $('#m-senha').value;
+  if (s.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres.', 'erro');
+  carga(true); try { await api.trocarSenha(s); toast('Senha trocada.'); fecharModal(); } catch (e) { toast(traduz(e).message, 'erro'); } finally { carga(false); }
+}
+async function logAjuste(novo, antigo) {
+  let det = null;
+  if (!antigo) det = 'Plantão criado pela coordenação';
+  else {
+    const mud = [];
+    if (antigo.medico_id !== novo.medico_id) mud.push(`médico: ${nomeCurto(perfil(antigo.medico_id))} → ${nomeCurto(perfil(novo.medico_id))}`);
+    if (D(antigo.inicio).getTime() !== D(novo.inicio).getTime() || D(antigo.fim).getTime() !== D(novo.fim).getTime()) mud.push(`horário: ${dm(D(antigo.inicio))} ${faixa(antigo)} → ${dm(D(novo.inicio))} ${faixa(novo)}`);
+    if (antigo.setor_id !== novo.setor_id) mud.push(`setor: ${setor(antigo.setor_id)?.nome} → ${setor(novo.setor_id)?.nome}`);
+    if (!mud.length) return; det = 'Alterado: ' + mud.join('; ');
+  }
+  try { await api.salvar('historico', { hospital_id: S.eu.hospital_id, tipo: 'ajuste', plantao_id: novo.id, de_medico_id: antigo ? antigo.medico_id : null, para_medico_id: novo.medico_id, setor_id: novo.setor_id, inicio: novo.inicio, fim: novo.fim, detalhes: det, feito_por: S.eu.id }); } catch (e) { /* o registro é complementar */ }
+}
+async function salvarPlantaoForm(id) {
+  const data = $('#f-data').value, hora = $('#f-hora').value, h = parseFloat(String($('#f-horas').value).replace(',', '.'));
+  if (!data || !hora || !(h > 0 && h <= 48)) return toast('Confira data, início e duração (até 48 horas).', 'erro');
+  const antigo = id ? plantao(id) : null;
+  if (antigo && solAtiva(antigo.id)) return toast('Este plantão tem um pedido em andamento. Cancele o pedido antes de editar.', 'erro');
+  const inicio = new Date(`${data}T${hora}`); const fim = new Date(inicio.getTime() + h * 36e5); const medico_id = $('#f-medico').value || null;
+  if (medico_id && S.plantoes.some(x => x.id !== id && x.medico_id === medico_id && D(x.inicio) < fim && D(x.fim) > inicio)) return toast(`${nomeCurto(perfil(medico_id))} já tem plantão nesse horário.`, 'erro');
+  const valor = $('#f-valor').value === '' ? null : Number($('#f-valor').value);
+  let tipo = $('#f-tipo').value; if (tipo === 'OUTRO') tipo = `${fmtH(h)}`.replace(',', '.');
+  const row = { hospital_id: S.eu.hospital_id, setor_id: $('#f-setor').value, medico_id, inicio: inicio.toISOString(), fim: fim.toISOString(), tipo, valor, observacao: $('#f-obs').value.trim() || null, status: medico_id ? 'designado' : 'vago' };
+  if (id) row.id = id;
+  const r = await executar(async () => { const salvo = await api.salvar('plantoes', row); await logAjuste(salvo, antigo); return salvo; }, id ? 'Plantão atualizado.' : 'Plantão criado.');
+  if (r !== FALHA) fecharModal();
+}
+function excluirPlantao(id) {
+  const p = plantao(id);
+  confirmar({ titulo: 'Excluir este plantão?', texto: 'Ele sai da escala de todos. Pedidos ligados a ele também são apagados.', ok: 'Excluir', perigo: true }, async () => {
+    const r = await executar(async () => {
+      try { await api.salvar('historico', { hospital_id: S.eu.hospital_id, tipo: 'ajuste', plantao_id: null, de_medico_id: p.medico_id, para_medico_id: null, setor_id: p.setor_id, inicio: p.inicio, fim: p.fim, detalhes: 'Plantão excluído pela coordenação', feito_por: S.eu.id }); } catch (e) {}
+      await api.excluir('plantoes', id);
+    }, 'Plantão excluído.');
+    if (r !== FALHA && S.view === 'plantao') history.back();
+  });
+}
+async function salvarMedico(id) {
+  const papel = $('#md-papel').value;
+  if (id === S.eu.id && papel !== 'coordenador') return toast('Para sair da coordenação, peça a outro coordenador.', 'erro');
+  if (id === S.eu.id && !$('#md-ativo').checked) return toast('Você não pode desativar o próprio acesso.', 'erro');
+  const row = { id, nome_na_escala: $('#md-escala').value.trim() || null, papel, ativo: $('#md-ativo').checked, setores: [...document.querySelectorAll('input[name=md-set]:checked')].map(x => x.value) };
+  const r = await executar(() => api.salvar('perfis', row), 'Médico atualizado.');
+  if (r !== FALHA) fecharModal();
+}
+function definirSenha(id) {
+  confirmar({ titulo: `Senha provisória para ${esc(nomeCurto(perfil(id)))}`, texto: 'Digite a nova senha (mínimo 6 caracteres) e envie para o médico por mensagem. Ele pode trocá-la em Meu perfil.', ok: 'Definir senha', campo: 'Nova senha' },
+    v => executar(() => api.rpc('redefinir_senha', { p_medico: id, p_senha: v.trim() }), S.modo === 'demo' ? 'Na demonstração as senhas não são usadas.' : 'Senha definida.'));
+}
+async function salvarSetor(id) {
+  const nome = $('#s-nome').value.trim(); if (!nome) return toast('Informe o nome do setor.', 'erro');
+  const row = { hospital_id: S.eu.hospital_id, nome, cor: $('#s-cor').value, exige_aprovacao: $('#s-aprov').checked, permite_divisao: $('#s-div').checked, ativo: $('#s-ativo').checked };
+  if (id) row.id = id;
+  const r = await executar(() => api.salvar('setores', row), 'Setor salvo.');
+  if (r !== FALHA) fecharModal();
+}
+
+// ---------- Excel: importar escala ----------
+function parseData(v) {
+  if (v instanceof Date) return { y: v.getFullYear(), m: v.getMonth() + 1, d: v.getDate() };
+  if (typeof v === 'number') { const o = XLSX.SSF.parse_date_code(v); return o ? { y: o.y, m: o.m, d: o.d } : null; }
+  const s = String(v || '').trim(); let m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return { y: +m[1], m: +m[2], d: +m[3] };
+  if ((m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/))) return { y: m[3].length === 2 ? 2000 + +m[3] : +m[3], m: +m[2], d: +m[1] };
+  return null;
+}
+function parseHora(v) {
+  if (v === '' || v == null) return null;
+  if (typeof v === 'number') { const min = Math.round((v % 1) * 1440); return { h: Math.floor(min / 60) % 24, mi: min % 60 }; }
+  const m = String(v).trim().match(/^(\d{1,2})\s*[:hH]\s*(\d{2})?/); return m ? { h: +m[1] % 24, mi: +(m[2] || 0) } : null;
+}
+async function lerImportacao(arquivo) {
+  if (!arquivo) return;
+  if (!window.XLSX) return toast('A biblioteca do Excel não carregou. Verifique a internet.', 'erro');
+  carga(true);
+  try {
+    const wb = XLSX.read(await arquivo.arrayBuffer(), { type: 'array' });
+    const aba = wb.SheetNames.find(n => norm(n) === 'importar') || wb.SheetNames[0];
+    const brutas = XLSX.utils.sheet_to_json(wb.Sheets[aba], { raw: true, defval: '' }).map(r => {
+      const o = {}; Object.entries(r).forEach(([k, v]) => { o[norm(k).replace(/[\s-]+/g, '_')] = v; }); return o;
+    });
+    S.imp = { nome: `${arquivo.name} (aba ${aba})`, brutas, linhas: [], novosSetores: [] };
+    await prepararImportacao();
+  } catch (e) { toast('Não consegui ler o arquivo: ' + traduz(e).message, 'erro'); }
+  finally { carga(false); }
+}
+async function prepararImportacao() {
+  const I = S.imp; const padrao = setor(S.impSetor) || S.setores[0];
+  const pega = (r, ...ks) => { for (const k of ks) if (r[k] !== undefined && r[k] !== '') return r[k]; return ''; };
+  const novos = new Set();
+  const linhas = I.brutas.filter(r => Object.values(r).some(v => String(v).trim() !== '')).map(r => {
+    const tipo = String(pega(r, 'turno', 'tipo') || 'P24').trim().toUpperCase();
+    const data = parseData(pega(r, 'data', 'dia'));
+    const setorNome = String(pega(r, 'setor') || padrao?.nome || '').trim();
+    const nomeOriginal = String(pega(r, 'nome_na_escala', 'medico', 'nome', 'profissional')).trim();
+    const l = { setorNome, nomeOriginal, tipo, obs: String(pega(r, 'observacao', 'obs')).trim() || null };
+    if (!data) return { ...l, situacao: 'erro', erro: 'Data inválida' };
+    const hi = parseHora(pega(r, 'inicio', 'hora_inicio', 'entrada')) || parseHora(TIPOS[tipo]?.ini || '07:00');
+    l.inicio = new Date(data.y, data.m - 1, data.d, hi.h, hi.mi);
+    const hs = parseFloat(String(pega(r, 'horas', 'duracao')).replace(',', '.'));
+    const hf = parseHora(pega(r, 'fim', 'hora_fim', 'saida'));
+    if (hs > 0) l.fim = new Date(l.inicio.getTime() + hs * 36e5);
+    else if (hf) { l.fim = new Date(data.y, data.m - 1, data.d, hf.h, hf.mi); if (l.fim <= l.inicio) l.fim = addDias(l.fim, 1); }
+    else l.fim = new Date(l.inicio.getTime() + (TIPOS[tipo]?.h || 24) * 36e5);
+    const v = pega(r, 'valor', 'valor_r$'); l.valor = v === '' ? null : Number(String(v).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')) || null;
+    const st = S.setores.find(s => norm(s.nome) === norm(setorNome));
+    if (!setorNome) return { ...l, situacao: 'erro', erro: 'Sem setor' };
+    if (!st) novos.add(setorNome);
+    l.setorId = st?.id || null;
+    l.medico = nomeOriginal ? S.perfis.find(m => norm(m.nome_na_escala) === norm(nomeOriginal)) || S.perfis.find(m => norm(m.nome) === norm(nomeOriginal)) : null;
+    l.situacao = l.medico ? 'ok' : 'vago';
+    return l;
+  });
+  const validas = linhas.filter(l => l.inicio);
+  if (validas.length) {
+    const min = new Date(Math.min(...validas.map(l => l.inicio))), max = new Date(Math.max(...validas.map(l => l.inicio)));
+    const existentes = await api.plantoesPeriodo(addDias(inicioDia(min), -1), addDias(inicioDia(max), 2));
+    const vistos = new Set(existentes.map(p => `${p.setor_id}|${D(p.inicio).getTime()}`));
+    validas.forEach(l => { if (l.situacao === 'erro' || !l.setorId) return; const k = `${l.setorId}|${l.inicio.getTime()}`; if (vistos.has(k)) l.situacao = 'duplicado'; else vistos.add(k); });
+  }
+  I.linhas = linhas; I.novosSetores = [...novos]; render();
+}
+async function confirmarImportacao() {
+  const I = S.imp;
+  const r = await executar(async () => {
+    const mapa = {};
+    for (const nome of I.novosSetores) { const s = await api.salvar('setores', { hospital_id: S.eu.hospital_id, nome, cor: '#971232', exige_aprovacao: false, permite_divisao: true, ativo: true }); mapa[norm(nome)] = s.id; }
+    const rows = I.linhas.filter(l => l.situacao === 'ok' || l.situacao === 'vago').map(l => ({
+      hospital_id: S.eu.hospital_id, setor_id: l.setorId || mapa[norm(l.setorNome)], medico_id: l.medico?.id || null,
+      inicio: l.inicio.toISOString(), fim: l.fim.toISOString(), tipo: TIPOS[l.tipo] ? l.tipo : (l.tipo || 'P24').slice(0, 12), valor: l.valor,
+      status: l.medico ? 'designado' : 'vago', observacao: l.obs }));
+    await api.inserirVarios('plantoes', rows);
+    return rows.length;
+  });
+  if (r !== FALHA) { toast(`${plural(r, 'plantão importado', 'plantões importados')}.`); S.imp = null; render(); }
+}
+function baixarModelo() {
+  if (!window.XLSX) return toast('A biblioteca do Excel não carregou. Verifique a internet.', 'erro');
+  const m = addMeses(new Date(), 1); const d = n => ymd(new Date(m.getFullYear(), m.getMonth(), n));
+  const st = setor(S.impSetor)?.nome || S.setores[0]?.nome || 'Clínica Médica';
+  const nomes = S.perfis.filter(p => p.nome_na_escala).map(p => p.nome_na_escala);
+  const ex = (n, i) => nomes[i % Math.max(nomes.length, 1)] || 'Nome na escala';
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['hospital', 'setor', 'data', 'inicio', 'fim', 'horas', 'turno', 'nome_na_escala', 'valor', 'observacao'],
+    [S.hospital?.nome || NOME_HOSPITAL, st, d(1), '07:00', '07:00', 24, 'P24', ex(1, 0), '', ''],
+    [S.hospital?.nome || NOME_HOSPITAL, st, d(2), '07:00', '07:00', 24, 'P24', ex(2, 1), '', ''],
+    [S.hospital?.nome || NOME_HOSPITAL, st, d(3), '07:00', '19:00', 12, 'D12', ex(3, 2), '', 'Exemplo de 12h diurno'],
+    [S.hospital?.nome || NOME_HOSPITAL, st, d(3), '19:00', '07:00', 12, 'N12', '', '', 'Sem nome = plantão vago'],
+  ]);
+  ws['!cols'] = [18, 16, 12, 8, 8, 7, 7, 18, 10, 26].map(w => ({ wch: w }));
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Importar');
+  XLSX.writeFile(wb, 'Modelo_Importar_Escala.xlsx');
+}
+
+// ---------- configuração / arquivo SQL ----------
+const sqlInstalacao = () => $('#sql-instalacao').textContent.trim();
+function baixarTexto(nome, texto) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([texto], { type: 'text/plain;charset=utf-8' })); a.download = nome;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+async function copiarSQL() {
+  const t = sqlInstalacao();
+  try { await navigator.clipboard.writeText(t); toast('Script copiado. Cole no SQL Editor do Supabase.'); }
+  catch (e) { abrirModal(`<h2 class="text-[19px] font-extrabold">Copie o script</h2><p class="mt-1 text-[14px] text-grafite/60">Toque na caixa, selecione tudo e copie.</p><textarea class="inp mt-3 h-72 font-mono text-[12px]" readonly onclick="this.select()">${esc(t)}</textarea><button class="btn btn-p mt-3 w-full" onclick="fecharModal()">Fechar</button>`); }
+}
+
+// =====================================================================
+//  NAVEGAÇÃO E INÍCIO
+// =====================================================================
+const TELAS = { home: vHome, agenda: vAgenda, plantao: vPlantao, trocar: vTrocar, dividir: vDividir, anuncios: vAnuncios, pendencias: vPendencias, mais: vMais, relatorios: vRelatorios, admin: vAdmin };
+const AO_ENTRAR = { relatorios: carregarRelatorio };
+function render() {
+  const v = S.view; let html;
+  if (v === 'setup') html = vSetup();
+  else if (v === 'login') html = vLogin();
+  else if (v === 'carregando') html = vCarregando();
+  else if (!S.eu) { S.view = 'login'; html = vLogin(); }
+  else if (v === 'primeiro') html = vPrimeiro();
+  else html = shell((TELAS[v] || vHome)());
+  $('#app').innerHTML = html;
+}
+function ir(view, params = {}) {
+  S.pilha.push({ view: S.view, params: S.params }); S.view = view; S.params = params;
+  history.pushState({ t: Date.now() }, ''); window.scrollTo(0, 0); render(); AO_ENTRAR[view]?.();
+}
+function irRaiz(view) {
+  S.pilha = view === 'home' ? [] : [{ view: 'home', params: {} }]; S.view = view; S.params = {};
+  history.pushState({ t: Date.now() }, ''); window.scrollTo(0, 0); render(); AO_ENTRAR[view]?.();
+}
+function substituir(view, params = {}) { S.view = view; S.params = params; window.scrollTo(0, 0); render(); }
+window.addEventListener('popstate', () => {
+  if (modalAberto()) { fecharModal(); history.pushState({ t: Date.now() }, ''); return; }
+  if (!S.eu || !S.pilha.length) return;
+  const a = S.pilha.pop(); S.view = a.view; S.params = a.params; render();
+});
+function selDia(k) { S.dia = k; render(); }
+async function mudarMes(n) {
+  S.mes = addMeses(S.mes, n);
+  const hoje = new Date(); S.dia = (S.mes.getMonth() === hoje.getMonth() && S.mes.getFullYear() === hoje.getFullYear()) ? ymd(hoje) : ymd(S.mes);
+  const [de, ate] = S.janela || [];
+  if (!de || S.mes < de || addMeses(S.mes, 1) > ate) { carga(true); try { await carregarDados(); } catch (e) { toast(traduz(e).message, 'erro'); } carga(false); }
+  render();
+}
+function mudarPendTab(v) { S.pendTab = v; render(); }
+function mudarAnTab(v) { S.anTab = v; render(); }
+function mudarAdmTab(v) { S.admTab = v; render(); }
+function tocarPlantao(id) {
+  const p = plantao(id);
+  if (ehMeu(p) || souCoord() || !p.medico_id) return ir('plantao', { id });
+  if (p.status === 'anunciado') { S.anTab = 'disponiveis'; return irRaiz('anuncios'); }
+  contato(p.medico_id);
+}
+
+async function entrar(u) {
+  const eu = await api.perfilDe(u.id);
+  if (!eu) { await api.sair(); throw new Error('Seu usuário ainda não tem perfil no app. Peça à coordenação para rodar de novo o script de instalação do banco.'); }
+  if (!eu.ativo) { await api.sair(); throw new Error('Seu acesso foi desativado pela coordenação.'); }
+  S.eu = eu;
+  if (!eu.cadastro_completo) { S.view = 'primeiro'; render(); return; }
+  await carregarDados();
+  S.pilha = []; S.view = 'home'; S.rel.dados = null; render();
+  if (!S.ouvindo) { api.ouvir(agendarRecarga); S.ouvindo = true; }
+}
+async function fazerLogin() {
+  const email = $('#l-email').value.trim(), senha = $('#l-senha').value;
+  if (!email || !senha) return toast('Preencha e-mail e senha.', 'erro');
+  const b = $('#l-btn'); b.disabled = true; b.textContent = 'Entrando…';
+  try { await entrar(await api.login(email, senha)); }
+  catch (e) { toast(traduz(e).message, 'erro'); if (S.view === 'login') { b.disabled = false; b.innerHTML = `${ic('login')} Entrar`; } }
+}
+async function sair() {
+  try { await api.sair(); } catch (e) {}
+  Object.assign(S, { eu: null, pilha: [], view: 'login', plantoes: [], sols: [], cands: [], perfis: [], ouvindo: false, troca: null, divisao: null, imp: null, rel: { ...S.rel, dados: null } });
+  render();
+}
+function abrirDemo() { if (!DB.perfis.length) seedDemo(); api = Demo; S.modo = 'demo'; S.view = 'login'; render(); }
+async function entrarDemo(id) { Demo.usuario = id; try { await entrar({ id }); } catch (e) { toast(traduz(e).message, 'erro'); } }
+function sairDemo() { api = null; S.modo = null; S.view = 'setup'; render(); }
+
+async function iniciar() {
+  if (!SUPABASE_URL.trim() || !SUPABASE_KEY.trim()) { S.view = 'setup'; render(); return; }
+  if (!window.supabase) { S.view = 'login'; render(); toast('Não foi possível carregar o Supabase. Verifique a internet e recarregue.', 'erro'); return; }
+  sb = window.supabase.createClient(SUPABASE_URL.trim(), SUPABASE_KEY.trim());
+  api = SupaAPI; S.modo = 'supabase'; S.view = 'carregando'; render();
+  try { const u = await api.sessao(); if (u) await entrar(u); else { S.view = 'login'; render(); } }
+  catch (e) { S.eu = null; S.view = 'login'; render(); toast(traduz(e).message, 'erro'); }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) agendarRecarga(); });
+iniciar();
+</script>
+<!-- Script de instalação do banco (usado pelos botões "Copiar" e "Baixar" da tela de configuração) -->
+<script type="text/plain" id="sql-instalacao">-- =====================================================================
+--  GESTÃO DE PLANTÃO  |  Script de instalação do banco (Supabase)
+--  Como usar: Supabase > SQL Editor > New query > cole TUDO > Run
+--  Pode rodar de novo quando houver atualização: ele não apaga dados.
+-- =====================================================================
+
+-- ---------- 1. TABELAS (todas com hospital_id: pronto para vários hospitais) ----------
+create table if not exists public.hospitais (
+  id uuid primary key default gen_random_uuid(),
+  nome text not null,
+  cidade text,
+  criado_em timestamptz not null default now()
+);
+
+create table if not exists public.setores (
+  id uuid primary key default gen_random_uuid(),
+  hospital_id uuid not null references public.hospitais(id) on delete cascade,
+  nome text not null,
+  cor text not null default '#971232',
+  exige_aprovacao boolean not null default false,   -- troca precisa do OK do coordenador?
+  permite_divisao boolean not null default true,
+  ativo boolean not null default true,
+  criado_em timestamptz not null default now(),
+  unique (hospital_id, nome)
+);
+
+create table if not exists public.perfis (           -- 1 linha por usuário (médico ou coordenador)
+  id uuid primary key references auth.users(id) on delete cascade,
+  hospital_id uuid not null references public.hospitais(id),
+  email text,
+  nome text,
+  nome_na_escala text,                               -- como o nome aparece no Excel (liga a planilha ao médico)
+  crm text,
+  uf_crm text,
+  especialidade text,
+  telefone text,
+  papel text not null default 'medico' check (papel in ('medico','coordenador')),
+  setores uuid[] not null default '{}',              -- setores em que o médico está habilitado
+  ativo boolean not null default true,
+  cadastro_completo boolean not null default false,
+  aceite_lgpd_em timestamptz,
+  criado_em timestamptz not null default now()
+);
+create unique index if not exists perfis_nome_escala_unico
+  on public.perfis (hospital_id, lower(nome_na_escala)) where coalesce(nome_na_escala, '') <> '';
+
+create table if not exists public.plantoes (
+  id uuid primary key default gen_random_uuid(),
+  hospital_id uuid not null references public.hospitais(id) on delete cascade,
+  setor_id uuid not null references public.setores(id) on delete cascade,
+  medico_id uuid references public.perfis(id) on delete set null,   -- vazio = plantão vago
+  inicio timestamptz not null,
+  fim timestamptz not null,
+  tipo text not null default 'P24',
+  valor numeric(10,2),
+  status text not null default 'designado' check (status in ('designado','anunciado','vago')),
+  origem_id uuid references public.plantoes(id) on delete set null, -- preenchido quando nasce de uma divisão
+  checkin_em timestamptz,
+  checkout_em timestamptz,
+  observacao text,
+  criado_em timestamptz not null default now(),
+  constraint plantao_horario_valido check (fim > inicio)
+);
+create index if not exists plantoes_hospital_inicio on public.plantoes (hospital_id, inicio);
+create index if not exists plantoes_medico_inicio on public.plantoes (medico_id, inicio);
+
+create table if not exists public.solicitacoes (      -- trocas, passagens e anúncios
+  id uuid primary key default gen_random_uuid(),
+  hospital_id uuid not null references public.hospitais(id) on delete cascade,
+  tipo text not null check (tipo in ('troca','passagem','anuncio')),
+  plantao_id uuid not null references public.plantoes(id) on delete cascade,
+  plantao_contra_id uuid references public.plantoes(id) on delete cascade,  -- na troca: o plantão do colega
+  solicitante_id uuid not null references public.perfis(id) on delete cascade,
+  destinatario_id uuid references public.perfis(id) on delete set null,     -- colega ou candidato escolhido
+  status text not null default 'pendente'
+    check (status in ('pendente','aguardando_coordenador','concluida','recusada','cancelada')),
+  mensagem text,
+  motivo text,
+  decidido_por uuid references public.perfis(id) on delete set null,
+  aceito_em timestamptz,
+  concluido_em timestamptz,
+  criado_em timestamptz not null default now()
+);
+create unique index if not exists solicitacao_ativa_plantao on public.solicitacoes (plantao_id)
+  where status in ('pendente','aguardando_coordenador');
+create unique index if not exists solicitacao_ativa_contra on public.solicitacoes (plantao_contra_id)
+  where plantao_contra_id is not null and status in ('pendente','aguardando_coordenador');
+
+create table if not exists public.candidaturas (      -- quem quer assumir um plantão anunciado
+  id uuid primary key default gen_random_uuid(),
+  hospital_id uuid not null references public.hospitais(id) on delete cascade,
+  solicitacao_id uuid not null references public.solicitacoes(id) on delete cascade,
+  medico_id uuid not null references public.perfis(id) on delete cascade,
+  status text not null default 'ativa' check (status in ('ativa','escolhida','nao_escolhida','cancelada')),
+  criado_em timestamptz not null default now(),
+  unique (solicitacao_id, medico_id)
+);
+
+create table if not exists public.historico (         -- base do relatório de trocas e do fechamento
+  id uuid primary key default gen_random_uuid(),
+  hospital_id uuid not null references public.hospitais(id) on delete cascade,
+  tipo text not null,                                 -- troca, passagem, anuncio, divisao, ajuste
+  plantao_id uuid references public.plantoes(id) on delete set null,
+  solicitacao_id uuid references public.solicitacoes(id) on delete set null,
+  de_medico_id uuid references public.perfis(id) on delete set null,
+  para_medico_id uuid references public.perfis(id) on delete set null,
+  setor_id uuid references public.setores(id) on delete set null,
+  inicio timestamptz,
+  fim timestamptz,
+  detalhes text,
+  feito_por uuid references public.perfis(id) on delete set null,
+  criado_em timestamptz not null default now()
+);
+create index if not exists historico_hospital_inicio on public.historico (hospital_id, inicio);
+
+-- ---------- 2. DADOS INICIAIS ----------
+insert into public.hospitais (nome, cidade)
+select 'Hospital Serrano', 'Nova Friburgo/RJ'
+where not exists (select 1 from public.hospitais);
+
+insert into public.setores (hospital_id, nome, cor)
+select h.id, 'Clínica Médica', '#971232' from public.hospitais h
+where not exists (select 1 from public.setores)
+order by h.criado_em limit 1;
+
+-- ---------- 3. FUNÇÕES DE APOIO ----------
+create or replace function public.meu_hospital() returns uuid
+language sql stable security definer set search_path = public as $$
+  select hospital_id from perfis where id = auth.uid() and ativo;
+$$;
+
+create or replace function public.eh_coordenador() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select papel = 'coordenador' from perfis where id = auth.uid() and ativo), false);
+$$;
+
+create or replace function public._eu() returns public.perfis
+language plpgsql stable security definer set search_path = public as $$
+declare p perfis;
+begin
+  select * into p from perfis where id = auth.uid() and ativo;
+  if p.id is null then raise exception 'Seu acesso não está ativo. Fale com a coordenação.'; end if;
+  return p;
+end $$;
+
+create or replace function public._apto(p_medico uuid, p_setor uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from perfis where id = p_medico and ativo and p_setor = any(setores));
+$$;
+
+create or replace function public._conflito(p_medico uuid, p_inicio timestamptz, p_fim timestamptz, p_ignorar uuid[] default '{}')
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from plantoes
+    where medico_id = p_medico and id <> all(array_remove(coalesce(p_ignorar, '{}'), null))
+      and inicio < p_fim and fim > p_inicio);
+$$;
+
+create or replace function public._exige_aprovacao(p_plantao uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce((select s.exige_aprovacao from plantoes p join setores s on s.id = p.setor_id where p.id = p_plantao), false);
+$$;
+
+-- ---------- 4. PERFIL AUTOMÁTICO PARA CADA USUÁRIO CRIADO ----------
+create or replace function public.novo_usuario() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare h uuid; primeiro boolean;
+begin
+  select id into h from hospitais order by criado_em limit 1;
+  select not exists (select 1 from perfis) into primeiro;
+  insert into perfis (id, hospital_id, email, papel)
+  values (new.id, h, new.email, case when primeiro then 'coordenador' else 'medico' end)
+  on conflict (id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists ao_criar_usuario on auth.users;
+create trigger ao_criar_usuario after insert on auth.users
+  for each row execute function public.novo_usuario();
+
+-- usuários criados antes deste script também ganham perfil
+insert into public.perfis (id, hospital_id, email)
+select u.id, (select id from public.hospitais order by criado_em limit 1), u.email
+from auth.users u on conflict (id) do nothing;
+
+-- se ainda não houver coordenador, o usuário mais antigo vira coordenador
+update public.perfis set papel = 'coordenador'
+where id = (select id from public.perfis order by criado_em limit 1)
+  and not exists (select 1 from public.perfis where papel = 'coordenador');
+
+-- ---------- 5. SEGURANÇA: cada pessoa só enxerga o próprio hospital ----------
+alter table public.hospitais    enable row level security;
+alter table public.setores      enable row level security;
+alter table public.perfis       enable row level security;
+alter table public.plantoes     enable row level security;
+alter table public.solicitacoes enable row level security;
+alter table public.candidaturas enable row level security;
+alter table public.historico    enable row level security;
+
+drop policy if exists hospitais_ler on public.hospitais;
+create policy hospitais_ler on public.hospitais for select to authenticated using (id = meu_hospital());
+drop policy if exists hospitais_coord on public.hospitais;
+create policy hospitais_coord on public.hospitais for update to authenticated
+  using (id = meu_hospital() and eh_coordenador()) with check (id = meu_hospital());
+
+drop policy if exists setores_ler on public.setores;
+create policy setores_ler on public.setores for select to authenticated using (hospital_id = meu_hospital());
+drop policy if exists setores_coord on public.setores;
+create policy setores_coord on public.setores for all to authenticated
+  using (hospital_id = meu_hospital() and eh_coordenador())
+  with check (hospital_id = meu_hospital() and eh_coordenador());
+
+drop policy if exists perfis_ler on public.perfis;
+create policy perfis_ler on public.perfis for select to authenticated using (hospital_id = meu_hospital());
+drop policy if exists perfis_proprio on public.perfis;
+create policy perfis_proprio on public.perfis for select to authenticated using (id = auth.uid());
+drop policy if exists perfis_coord on public.perfis;
+create policy perfis_coord on public.perfis for update to authenticated
+  using (hospital_id = meu_hospital() and eh_coordenador())
+  with check (hospital_id = meu_hospital());
+
+drop policy if exists plantoes_ler on public.plantoes;
+create policy plantoes_ler on public.plantoes for select to authenticated using (hospital_id = meu_hospital());
+drop policy if exists plantoes_coord on public.plantoes;
+create policy plantoes_coord on public.plantoes for all to authenticated
+  using (hospital_id = meu_hospital() and eh_coordenador())
+  with check (hospital_id = meu_hospital() and eh_coordenador());
+
+drop policy if exists solicitacoes_ler on public.solicitacoes;
+create policy solicitacoes_ler on public.solicitacoes for select to authenticated
+  using (hospital_id = meu_hospital() and (eh_coordenador() or tipo = 'anuncio'
+         or solicitante_id = auth.uid() or destinatario_id = auth.uid()));
+
+drop policy if exists candidaturas_ler on public.candidaturas;
+create policy candidaturas_ler on public.candidaturas for select to authenticated using (hospital_id = meu_hospital());
+
+drop policy if exists historico_ler on public.historico;
+create policy historico_ler on public.historico for select to authenticated
+  using (hospital_id = meu_hospital() and (eh_coordenador()
+         or de_medico_id = auth.uid() or para_medico_id = auth.uid() or feito_por = auth.uid()));
+drop policy if exists historico_coord on public.historico;
+create policy historico_coord on public.historico for insert to authenticated
+  with check (hospital_id = meu_hospital() and eh_coordenador());
+
+-- ---------- 6. AÇÕES DO APP (as regras ficam aqui, no servidor) ----------
+create or replace function public._executar(p_sol uuid, p_por uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare s solicitacoes; pl plantoes; pc plantoes;
+begin
+  select * into s from solicitacoes where id = p_sol for update;
+  select * into pl from plantoes where id = s.plantao_id for update;
+  if pl.inicio <= now() then raise exception 'O plantão já começou; este pedido não vale mais.'; end if;
+  if not (s.tipo = 'anuncio' and pl.medico_id is null) and pl.medico_id is distinct from s.solicitante_id then
+    raise exception 'O plantão mudou de dono desde o pedido.'; end if;
+  if s.destinatario_id is null then raise exception 'Falta definir quem assume o plantão.'; end if;
+  if s.tipo = 'troca' then
+    select * into pc from plantoes where id = s.plantao_contra_id for update;
+    if pc.medico_id is distinct from s.destinatario_id or pc.inicio <= now() then
+      raise exception 'O plantão do colega mudou desde o pedido.'; end if;
+    if _conflito(s.destinatario_id, pl.inicio, pl.fim, array[pc.id]) or _conflito(s.solicitante_id, pc.inicio, pc.fim, array[pl.id]) then
+      raise exception 'Conflito de horário: alguém já tem plantão nesse período.'; end if;
+    update plantoes set medico_id = s.destinatario_id, status = 'designado' where id = pl.id;
+    update plantoes set medico_id = s.solicitante_id, status = 'designado' where id = pc.id;
+    insert into historico (hospital_id, tipo, plantao_id, solicitacao_id, de_medico_id, para_medico_id, setor_id, inicio, fim, feito_por)
+    values (s.hospital_id, 'troca', pl.id, s.id, s.solicitante_id, s.destinatario_id, pl.setor_id, pl.inicio, pl.fim, p_por),
+           (s.hospital_id, 'troca', pc.id, s.id, s.destinatario_id, s.solicitante_id, pc.setor_id, pc.inicio, pc.fim, p_por);
+  else
+    if _conflito(s.destinatario_id, pl.inicio, pl.fim) then raise exception 'Quem vai assumir já tem plantão nesse horário.'; end if;
+    update plantoes set medico_id = s.destinatario_id, status = 'designado' where id = pl.id;
+    insert into historico (hospital_id, tipo, plantao_id, solicitacao_id, de_medico_id, para_medico_id, setor_id, inicio, fim, feito_por)
+    values (s.hospital_id, s.tipo, pl.id, s.id, pl.medico_id, s.destinatario_id, pl.setor_id, pl.inicio, pl.fim, p_por);
+  end if;
+  update solicitacoes set status = 'concluida', concluido_em = now(), decidido_por = coalesce(decidido_por, p_por) where id = s.id;
+  update solicitacoes set status = 'cancelada', motivo = 'O plantão foi movimentado por outro pedido.'
+   where id <> s.id and status in ('pendente','aguardando_coordenador')
+     and (plantao_id in (pl.id, pc.id) or plantao_contra_id in (pl.id, pc.id));
+end $$;
+
+create or replace function public.criar_solicitacao(p_tipo text, p_plantao uuid, p_destinatario uuid default null,
+  p_plantao_contra uuid default null, p_mensagem text default null)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); pl plantoes; pc plantoes; novo uuid;
+begin
+  if p_tipo not in ('troca','passagem','anuncio') then raise exception 'Tipo de pedido inválido.'; end if;
+  select * into pl from plantoes where id = p_plantao and hospital_id = eu.hospital_id for update;
+  if pl.id is null then raise exception 'Plantão não encontrado.'; end if;
+  if pl.inicio <= now() then raise exception 'Esse plantão já começou.'; end if;
+  if pl.medico_id is null then
+    if not (p_tipo = 'anuncio' and eu.papel = 'coordenador') then raise exception 'Plantão vago: só a coordenação pode anunciar.'; end if;
+  elsif pl.medico_id <> eu.id then raise exception 'Este plantão não é seu.';
+  end if;
+  if p_tipo in ('troca','passagem') then
+    if p_destinatario is null or p_destinatario = eu.id then raise exception 'Escolha um colega.'; end if;
+    if not _apto(p_destinatario, pl.setor_id) then raise exception 'O colega não está habilitado neste setor.'; end if;
+  end if;
+  if p_tipo = 'troca' then
+    select * into pc from plantoes where id = p_plantao_contra and hospital_id = eu.hospital_id;
+    if pc.id is null or pc.medico_id is distinct from p_destinatario then raise exception 'Escolha um plantão do colega para trocar.'; end if;
+    if pc.inicio <= now() then raise exception 'O plantão do colega já começou.'; end if;
+    if not _apto(eu.id, pc.setor_id) then raise exception 'Você não está habilitado no setor do plantão do colega.'; end if;
+    if _conflito(p_destinatario, pl.inicio, pl.fim, array[pc.id]) then raise exception 'O colega já tem plantão no seu horário.'; end if;
+    if _conflito(eu.id, pc.inicio, pc.fim, array[pl.id]) then raise exception 'Você já tem plantão no horário do colega.'; end if;
+  elsif p_tipo = 'passagem' then
+    if _conflito(p_destinatario, pl.inicio, pl.fim) then raise exception 'O colega já tem plantão nesse horário.'; end if;
+  end if;
+  begin
+    insert into solicitacoes (hospital_id, tipo, plantao_id, plantao_contra_id, solicitante_id, destinatario_id, mensagem)
+    values (eu.hospital_id, p_tipo, pl.id, pc.id, eu.id,
+            case when p_tipo = 'anuncio' then null else p_destinatario end, nullif(trim(p_mensagem), ''))
+    returning id into novo;
+  exception when unique_violation then
+    raise exception 'Já existe um pedido em andamento para este plantão.';
+  end;
+  if p_tipo = 'anuncio' then update plantoes set status = 'anunciado' where id = pl.id; end if;
+  return novo;
+end $$;
+
+create or replace function public.responder_solicitacao(p_solicitacao uuid, p_aceitar boolean, p_motivo text default null)
+returns text language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); s solicitacoes;
+begin
+  select * into s from solicitacoes where id = p_solicitacao and hospital_id = eu.hospital_id for update;
+  if s.id is null or s.tipo = 'anuncio' or s.destinatario_id is distinct from eu.id then raise exception 'Pedido não encontrado.'; end if;
+  if s.status <> 'pendente' then raise exception 'Este pedido já foi respondido.'; end if;
+  if not p_aceitar then
+    update solicitacoes set status = 'recusada', motivo = nullif(trim(p_motivo), ''), decidido_por = eu.id where id = s.id;
+    return 'recusada';
+  end if;
+  update solicitacoes set aceito_em = now() where id = s.id;
+  if _exige_aprovacao(s.plantao_id) or (s.plantao_contra_id is not null and _exige_aprovacao(s.plantao_contra_id)) then
+    update solicitacoes set status = 'aguardando_coordenador' where id = s.id;
+    return 'aguardando_coordenador';
+  end if;
+  perform _executar(s.id, eu.id);
+  return 'concluida';
+end $$;
+
+create or replace function public.aprovar_solicitacao(p_solicitacao uuid, p_aprovar boolean, p_motivo text default null)
+returns text language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); s solicitacoes;
+begin
+  if eu.papel <> 'coordenador' then raise exception 'Só a coordenação aprova pedidos.'; end if;
+  select * into s from solicitacoes where id = p_solicitacao and hospital_id = eu.hospital_id for update;
+  if s.id is null or s.status <> 'aguardando_coordenador' then raise exception 'Não há nada para aprovar neste pedido.'; end if;
+  if not p_aprovar then
+    update solicitacoes set status = 'recusada', decidido_por = eu.id,
+      motivo = coalesce(nullif(trim(p_motivo), ''), 'Recusado pela coordenação.') where id = s.id;
+    update plantoes set status = case when medico_id is null then 'vago' else 'designado' end
+     where id = s.plantao_id and status = 'anunciado';
+    return 'recusada';
+  end if;
+  update solicitacoes set decidido_por = eu.id where id = s.id;
+  perform _executar(s.id, eu.id);
+  return 'concluida';
+end $$;
+
+create or replace function public.candidatar(p_solicitacao uuid, p_entrar boolean default true)
+returns void language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); s solicitacoes; pl plantoes;
+begin
+  select * into s from solicitacoes where id = p_solicitacao and hospital_id = eu.hospital_id;
+  if s.id is null or s.tipo <> 'anuncio' or s.status <> 'pendente' then raise exception 'Este anúncio não está mais disponível.'; end if;
+  if not p_entrar then
+    update candidaturas set status = 'cancelada' where solicitacao_id = s.id and medico_id = eu.id and status = 'ativa';
+    return;
+  end if;
+  if s.solicitante_id = eu.id then raise exception 'O anúncio é seu.'; end if;
+  select * into pl from plantoes where id = s.plantao_id;
+  if pl.medico_id = eu.id then raise exception 'O plantão já é seu.'; end if;
+  if not _apto(eu.id, pl.setor_id) then raise exception 'Você não está habilitado neste setor.'; end if;
+  if _conflito(eu.id, pl.inicio, pl.fim) then raise exception 'Você já tem plantão nesse horário.'; end if;
+  insert into candidaturas (hospital_id, solicitacao_id, medico_id) values (eu.hospital_id, s.id, eu.id)
+  on conflict (solicitacao_id, medico_id) do update set status = 'ativa', criado_em = now();
+end $$;
+
+create or replace function public.escolher_candidato(p_solicitacao uuid, p_medico uuid)
+returns text language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); s solicitacoes;
+begin
+  select * into s from solicitacoes where id = p_solicitacao and hospital_id = eu.hospital_id for update;
+  if s.id is null or s.tipo <> 'anuncio' or s.status <> 'pendente' then raise exception 'Este anúncio não está mais disponível.'; end if;
+  if s.solicitante_id <> eu.id and eu.papel <> 'coordenador' then raise exception 'Só quem anunciou ou a coordenação escolhe o candidato.'; end if;
+  if not exists (select 1 from candidaturas where solicitacao_id = s.id and medico_id = p_medico and status = 'ativa') then
+    raise exception 'Esse candidato não está mais disponível.'; end if;
+  update solicitacoes set destinatario_id = p_medico, aceito_em = now() where id = s.id;
+  update candidaturas set status = case when medico_id = p_medico then 'escolhida' else 'nao_escolhida' end
+   where solicitacao_id = s.id and status = 'ativa';
+  if _exige_aprovacao(s.plantao_id) and eu.papel <> 'coordenador' then
+    update solicitacoes set status = 'aguardando_coordenador' where id = s.id;
+    return 'aguardando_coordenador';
+  end if;
+  update solicitacoes set decidido_por = eu.id where id = s.id;
+  perform _executar(s.id, eu.id);
+  return 'concluida';
+end $$;
+
+create or replace function public.cancelar_solicitacao(p_solicitacao uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); s solicitacoes;
+begin
+  select * into s from solicitacoes where id = p_solicitacao and hospital_id = eu.hospital_id for update;
+  if s.id is null or (s.solicitante_id <> eu.id and eu.papel <> 'coordenador') then raise exception 'Pedido não encontrado.'; end if;
+  if s.status not in ('pendente','aguardando_coordenador') then raise exception 'Este pedido já foi encerrado.'; end if;
+  update solicitacoes set status = 'cancelada', decidido_por = eu.id where id = s.id;
+  update plantoes set status = case when medico_id is null then 'vago' else 'designado' end
+   where id = s.plantao_id and status = 'anunciado';
+  update candidaturas set status = 'cancelada' where solicitacao_id = s.id and status = 'ativa';
+end $$;
+
+create or replace function public.dividir_plantao(p_plantao uuid, p_ponto timestamptz)
+returns uuid language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); pl plantoes; st setores; novo uuid; v1 numeric; v2 numeric;
+begin
+  select * into pl from plantoes where id = p_plantao and hospital_id = eu.hospital_id for update;
+  if pl.id is null then raise exception 'Plantão não encontrado.'; end if;
+  if pl.medico_id is distinct from eu.id and eu.papel <> 'coordenador' then raise exception 'Este plantão não é seu.'; end if;
+  select * into st from setores where id = pl.setor_id;
+  if not st.permite_divisao and eu.papel <> 'coordenador' then raise exception 'A divisão não é permitida neste setor.'; end if;
+  if pl.inicio <= now() and eu.papel <> 'coordenador' then raise exception 'Esse plantão já começou.'; end if;
+  if exists (select 1 from solicitacoes where status in ('pendente','aguardando_coordenador')
+             and (plantao_id = pl.id or plantao_contra_id = pl.id)) then
+    raise exception 'Cancele o pedido em andamento antes de dividir.'; end if;
+  if p_ponto < pl.inicio + interval '1 hour' or p_ponto > pl.fim - interval '1 hour' then
+    raise exception 'Cada parte precisa ter pelo menos 1 hora.'; end if;
+  if pl.valor is not null then
+    v1 := round(pl.valor * extract(epoch from (p_ponto - pl.inicio)) / extract(epoch from (pl.fim - pl.inicio)), 2);
+    v2 := pl.valor - v1;
+  end if;
+  update plantoes set fim = p_ponto, valor = v1 where id = pl.id;
+  insert into plantoes (hospital_id, setor_id, medico_id, inicio, fim, tipo, valor, status, origem_id, observacao)
+  values (pl.hospital_id, pl.setor_id, pl.medico_id, p_ponto, pl.fim, pl.tipo, v2,
+          case when pl.medico_id is null then 'vago' else 'designado' end, pl.id, pl.observacao)
+  returning id into novo;
+  insert into historico (hospital_id, tipo, plantao_id, de_medico_id, para_medico_id, setor_id, inicio, fim, detalhes, feito_por)
+  values (pl.hospital_id, 'divisao', pl.id, pl.medico_id, pl.medico_id, pl.setor_id, pl.inicio, pl.fim,
+          'Dividido às ' || to_char(p_ponto at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI'), eu.id);
+  return novo;
+end $$;
+
+create or replace function public.registrar_presenca(p_plantao uuid, p_acao text)
+returns void language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu(); pl plantoes;
+begin
+  select * into pl from plantoes where id = p_plantao and medico_id = eu.id for update;
+  if pl.id is null then raise exception 'Plantão não encontrado.'; end if;
+  if p_acao = 'entrada' then
+    if now() < pl.inicio - interval '2 hours' or now() > pl.fim then
+      raise exception 'A entrada pode ser registrada de 2h antes do início até o fim do plantão.'; end if;
+    update plantoes set checkin_em = now() where id = pl.id and checkin_em is null;
+  else
+    if pl.checkin_em is null then raise exception 'Registre a entrada primeiro.'; end if;
+    update plantoes set checkout_em = now() where id = pl.id and checkout_em is null;
+  end if;
+end $$;
+
+create or replace function public.atualizar_meu_perfil(p_nome text, p_crm text, p_uf text,
+  p_especialidade text default null, p_telefone text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare eu perfis := _eu();
+begin
+  if coalesce(trim(p_nome), '') = '' or coalesce(trim(p_crm), '') = '' then raise exception 'Preencha nome completo e CRM.'; end if;
+  update perfis set nome = trim(p_nome), crm = trim(p_crm), uf_crm = upper(trim(p_uf)),
+    especialidade = nullif(trim(p_especialidade), ''), telefone = nullif(trim(p_telefone), ''),
+    cadastro_completo = true, aceite_lgpd_em = coalesce(aceite_lgpd_em, now())
+  where id = eu.id;
+end $$;
+
+-- a coordenação define uma senha provisória (não depende de e-mail)
+create or replace function public.redefinir_senha(p_medico uuid, p_senha text)
+returns void language plpgsql security definer set search_path = public, extensions as $$
+declare eu perfis := _eu();
+begin
+  if eu.papel <> 'coordenador' then raise exception 'Só a coordenação redefine senhas.'; end if;
+  if length(coalesce(p_senha, '')) < 6 then raise exception 'A senha precisa ter pelo menos 6 caracteres.'; end if;
+  if not exists (select 1 from perfis where id = p_medico and hospital_id = eu.hospital_id) then raise exception 'Médico não encontrado.'; end if;
+  update auth.users set encrypted_password = crypt(p_senha, gen_salt('bf')), updated_at = now() where id = p_medico;
+end $$;
+
+-- ---------- 7. PERMISSÕES E TEMPO REAL ----------
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant execute on all functions in schema public to authenticated;
+-- a função interna que efetiva a troca só pode ser chamada pelas outras funções (nunca direto pelo app)
+revoke execute on function public._executar(uuid, uuid) from public, anon, authenticated;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['plantoes','solicitacoes','candidaturas','perfis','setores'] loop
+    begin
+      execute format('alter publication supabase_realtime add table public.%I', t);
+    exception when others then null;  -- já estava no tempo real
+    end;
+  end loop;
+end $$;
+
+-- Pronto! Agora crie os usuários em Authentication > Users > Add user > Create new user.
+-- O PRIMEIRO usuário criado vira coordenador automaticamente.
+</script>
+</body>
+</html>
